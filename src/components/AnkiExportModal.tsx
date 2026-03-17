@@ -131,8 +131,9 @@ export default function AnkiExportModal({ cards, onClose }: Props) {
                 </svg>
               </button>
               <p className="font-semibold text-indigo-700 text-sm pr-6">{card.front}</p>
-              <p className="text-xs text-gray-500 mt-1 line-clamp-2 whitespace-pre-wrap">
-                {card.back}
+              <p className="text-xs text-gray-700 mt-1">{card.meaning}</p>
+              <p className="text-xs text-gray-400 mt-0.5 line-clamp-2 whitespace-pre-wrap">
+                {card.detail}
               </p>
             </div>
           ))}

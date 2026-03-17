@@ -14,8 +14,10 @@ export interface Message {
 export interface AnkiCard {
   /** English word / phrase */
   front: string;
-  /** Japanese translation + example sentence + etymology / nuance */
-  back: string;
+  /** Japanese translation (meaning only, no examples) */
+  meaning: string;
+  /** Example sentence + usage notes / nuance */
+  detail: string;
 }
 
 /** Which side shows first in Anki */

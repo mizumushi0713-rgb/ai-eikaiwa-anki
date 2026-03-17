@@ -66,17 +66,17 @@ function buildModel(pattern: ExportPattern) {
       ? 'AI英会話カード (英→日)'
       : 'AI英会話カード (日→英)';
 
-  // Pattern A: English front, Japanese back (with TTS on front)
-  // Pattern B: Japanese front, English back (with TTS on back)
+  // Pattern A (en-to-ja): Front=英語, Back=日本語訳+例文+解説
+  // Pattern B (ja-to-en): Front=日本語訳のみ, Back=英語+例文+解説
   const qfmt =
     pattern === 'en-to-ja'
       ? '<div class="front">{{Front}}</div>\n{{tts en_US:Front}}'
-      : '<div class="front">{{Back}}</div>';
+      : '<div class="front">{{Meaning}}</div>';
 
   const afmt =
     pattern === 'en-to-ja'
-      ? '{{FrontSide}}\n<hr id="answer">\n<div class="back">{{Back}}</div>'
-      : '{{FrontSide}}\n<hr id="answer">\n<div class="back">{{Front}}</div>\n{{tts en_US:Front}}';
+      ? '{{FrontSide}}\n<hr id="answer">\n<div class="back"><b>{{Meaning}}</b><br><br>{{Detail}}</div>'
+      : '{{FrontSide}}\n<hr id="answer">\n<div class="back"><b>{{Front}}</b><br>{{tts en_US:Front}}<br><br>{{Detail}}</div>';
 
   return {
     id: String(id),
@@ -110,8 +110,17 @@ function buildModel(pattern: ExportPattern) {
         media: [],
       },
       {
-        name: 'Back',
+        name: 'Meaning',
         ord: 1,
+        sticky: false,
+        rtl: false,
+        font: 'Arial',
+        size: 20,
+        media: [],
+      },
+      {
+        name: 'Detail',
+        ord: 2,
         sticky: false,
         rtl: false,
         font: 'Arial',
@@ -345,8 +354,8 @@ export async function generateApkg(
   for (const card of cards) {
     const noteId = Date.now() + cardDue; // unique ms-based id
     const guid = generateGuid();
-    // Fields separator in Anki is \x1f
-    const flds = `${card.front}\x1f${card.back}`;
+    // Fields separator in Anki is \x1f (Front, Meaning, Detail)
+    const flds = `${card.front}\x1f${card.meaning}\x1f${card.detail}`;
     const sfld = card.front;
     const csum = fieldChecksum(sfld);
 

@@ -19,7 +19,7 @@ export async function POST(req: NextRequest) {
     const date = new Date().toISOString().slice(0, 10);
     const filename = `AI英会話_${date}.apkg`;
 
-    return new Response(apkgBuffer, {
+    return new Response(new Uint8Array(apkgBuffer), {
       headers: {
         'Content-Type': 'application/octet-stream',
         'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(filename)}`,

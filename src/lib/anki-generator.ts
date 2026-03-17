@@ -234,7 +234,7 @@ export async function generateApkg(
   // Load sql.js WASM from public directory (copied via postinstall)
   const wasmPath = path.join(process.cwd(), 'public', 'sql-wasm.wasm');
   const wasmBinary = fs.readFileSync(wasmPath);
-  const SQL = await initSqlJs({ wasmBinary });
+  const SQL = await initSqlJs({ wasmBinary: wasmBinary.buffer as ArrayBuffer });
 
   const db = new SQL.Database();
 

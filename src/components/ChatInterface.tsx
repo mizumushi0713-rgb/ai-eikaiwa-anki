@@ -3,7 +3,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import MessageBubble from './MessageBubble';
 import AnkiExportModal from './AnkiExportModal';
-import { useSpeechRecognition } from '@/hooks/useSpeechRecognition';
+import { useSpeechRecognition, type SpeechLang } from '@/hooks/useSpeechRecognition';
 import type { Message, AnkiCard, AIProvider } from '@/lib/types';
 
 function generateId(): string {
@@ -21,6 +21,7 @@ export default function ChatInterface() {
   const [isExtracting, setIsExtracting] = useState(false);
   const [ankiCards, setAnkiCards] = useState<AnkiCard[] | null>(null);
   const [provider, setProvider] = useState<AIProvider>('gemini');
+  const [speechLang, setSpeechLang] = useState<SpeechLang>('en-US');
 
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -245,20 +246,30 @@ export default function ChatInterface() {
         )}
         <form onSubmit={handleSubmit} className="flex items-end gap-2">
           {speechInputSupported && (
-            <button
-              type="button"
-              onClick={isListening ? stopListening : startListening}
-              title={isListening ? '録音停止' : '英語を音声入力'}
-              className={`flex-shrink-0 w-10 h-10 rounded-full flex items-center justify-center transition-colors ${
-                isListening
-                  ? 'bg-red-500 text-white animate-pulse'
-                  : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
-              }`}
-            >
-              <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
-                <path fillRule="evenodd" d="M7 4a3 3 0 016 0v4a3 3 0 11-6 0V4zm4 10.93A7.001 7.001 0 0017 8a1 1 0 10-2 0A5 5 0 015 8a1 1 0 00-2 0 7.001 7.001 0 006 6.93V17H6a1 1 0 100 2h8a1 1 0 100-2h-3v-2.07z" clipRule="evenodd" />
-              </svg>
-            </button>
+            <div className="flex flex-col items-center gap-1 flex-shrink-0">
+              <button
+                type="button"
+                onClick={isListening ? stopListening : () => startListening(speechLang)}
+                title={isListening ? '録音停止' : `${speechLang === 'en-US' ? '英語' : '日本語'}を音声入力`}
+                className={`w-10 h-10 rounded-full flex items-center justify-center transition-colors ${
+                  isListening
+                    ? 'bg-red-500 text-white animate-pulse'
+                    : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
+                }`}
+              >
+                <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                  <path fillRule="evenodd" d="M7 4a3 3 0 016 0v4a3 3 0 11-6 0V4zm4 10.93A7.001 7.001 0 0017 8a1 1 0 10-2 0A5 5 0 015 8a1 1 0 00-2 0 7.001 7.001 0 006 6.93V17H6a1 1 0 100 2h8a1 1 0 100-2h-3v-2.07z" clipRule="evenodd" />
+                </svg>
+              </button>
+              <button
+                type="button"
+                onClick={() => setSpeechLang(speechLang === 'en-US' ? 'ja-JP' : 'en-US')}
+                disabled={isListening}
+                className="text-[10px] font-bold text-gray-500 hover:text-indigo-600 disabled:opacity-50"
+              >
+                {speechLang === 'en-US' ? 'EN' : 'JP'}
+              </button>
+            </div>
           )}
 
           <textarea

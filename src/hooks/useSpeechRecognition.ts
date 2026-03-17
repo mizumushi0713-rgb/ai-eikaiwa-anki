@@ -2,12 +2,14 @@
 
 import { useState, useRef, useCallback, useEffect } from 'react';
 
+export type SpeechLang = 'en-US' | 'ja-JP';
+
 interface UseSpeechRecognitionReturn {
   transcript: string;
   isListening: boolean;
   isSupported: boolean;
   error: string;
-  startListening: () => void;
+  startListening: (lang: SpeechLang) => void;
   stopListening: () => void;
   resetTranscript: () => void;
 }
@@ -26,7 +28,7 @@ export function useSpeechRecognition(): UseSpeechRecognitionReturn {
     setIsSupported(!!SpeechRecognition);
   }, []);
 
-  const startListening = useCallback(() => {
+  const startListening = useCallback((lang: SpeechLang) => {
     setError('');
     const w = window as any;
     const SpeechRecognition = w.SpeechRecognition || w.webkitSpeechRecognition;
@@ -36,15 +38,18 @@ export function useSpeechRecognition(): UseSpeechRecognitionReturn {
     }
 
     const recognition = new SpeechRecognition();
-    recognition.lang = 'en-US';
-    recognition.continuous = false;
-    recognition.interimResults = false;
+    recognition.lang = lang;
+    recognition.continuous = true;
+    recognition.interimResults = true;
 
     recognition.onstart = () => setIsListening(true);
 
     recognition.onresult = (event: any) => {
-      const result = event.results[0]?.[0]?.transcript ?? '';
-      if (result) setTranscript(result.trim());
+      let finalText = '';
+      for (let i = 0; i < event.results.length; i++) {
+        finalText += event.results[i][0].transcript;
+      }
+      if (finalText) setTranscript(finalText.trim());
     };
 
     recognition.onerror = (event: any) => {

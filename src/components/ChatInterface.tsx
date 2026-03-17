@@ -22,25 +22,26 @@ export default function ChatInterface() {
   const [ankiCards, setAnkiCards] = useState<AnkiCard[] | null>(null);
   const [provider, setProvider] = useState<AIProvider>('gemini');
   const [speechLang, setSpeechLang] = useState<SpeechLang>('en-US');
+  const [playingMsgId, setPlayingMsgId] = useState<string | null>(null);
 
   const bottomRef = useRef<HTMLDivElement>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
 
   const {
-    transcript,
-    isListening,
+    isRecording,
+    isTranscribing,
     isSupported: speechInputSupported,
     error: speechError,
-    startListening,
-    stopListening,
-    resetTranscript,
+    startRecording,
+    stopRecording,
+    onTranscript,
   } = useSpeechRecognition();
 
   useEffect(() => {
-    if (transcript) {
-      setInput(transcript);
-      resetTranscript();
-    }
-  }, [transcript, resetTranscript]);
+    onTranscript((text) => {
+      setInput((prev) => (prev ? prev + ' ' + text : text));
+    });
+  }, [onTranscript]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -113,6 +114,37 @@ export default function ChatInterface() {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       sendMessage(input);
+    }
+  };
+
+  const handleTTS = async (msgId: string, text: string) => {
+    if (playingMsgId === msgId) {
+      audioRef.current?.pause();
+      setPlayingMsgId(null);
+      return;
+    }
+
+    setPlayingMsgId(msgId);
+    try {
+      const res = await fetch('/api/tts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const audio = new Audio(url);
+      audioRef.current = audio;
+      audio.onended = () => {
+        setPlayingMsgId(null);
+        URL.revokeObjectURL(url);
+      };
+      audio.play();
+    } catch (err) {
+      console.error('TTS error:', err);
+      setPlayingMsgId(null);
     }
   };
 
@@ -219,7 +251,14 @@ export default function ChatInterface() {
       {/* ── Messages ── */}
       <main className="flex-1 overflow-y-auto px-4 py-4">
         {messages.map((msg) => (
-          <MessageBubble key={msg.id} message={msg} />
+          <MessageBubble
+            key={msg.id}
+            message={msg}
+            onTTS={msg.role === 'assistant' && msg.content && !msg.content.startsWith('⚠')
+              ? () => handleTTS(msg.id, msg.content)
+              : undefined}
+            isPlaying={playingMsgId === msg.id}
+          />
         ))}
 
         {isLoading && (
@@ -244,27 +283,40 @@ export default function ChatInterface() {
         {speechError && (
           <p className="text-xs text-red-500 mb-2 px-1">{speechError}</p>
         )}
+        {isTranscribing && (
+          <p className="text-xs text-indigo-500 mb-2 px-1">文字起こし中...</p>
+        )}
         <form onSubmit={handleSubmit} className="flex items-end gap-2">
           {speechInputSupported && (
             <div className="flex flex-col items-center gap-1 flex-shrink-0">
               <button
                 type="button"
-                onClick={isListening ? stopListening : () => startListening(speechLang)}
-                title={isListening ? '録音停止' : `${speechLang === 'en-US' ? '英語' : '日本語'}を音声入力`}
+                onClick={isRecording ? stopRecording : () => startRecording(speechLang)}
+                disabled={isTranscribing}
+                title={isRecording ? '録音停止' : `${speechLang === 'en-US' ? '英語' : '日本語'}を音声入力`}
                 className={`w-10 h-10 rounded-full flex items-center justify-center transition-colors ${
-                  isListening
+                  isRecording
                     ? 'bg-red-500 text-white animate-pulse'
-                    : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
+                    : isTranscribing
+                      ? 'bg-yellow-100 text-yellow-600'
+                      : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
                 }`}
               >
-                <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
-                  <path fillRule="evenodd" d="M7 4a3 3 0 016 0v4a3 3 0 11-6 0V4zm4 10.93A7.001 7.001 0 0017 8a1 1 0 10-2 0A5 5 0 015 8a1 1 0 00-2 0 7.001 7.001 0 006 6.93V17H6a1 1 0 100 2h8a1 1 0 100-2h-3v-2.07z" clipRule="evenodd" />
-                </svg>
+                {isTranscribing ? (
+                  <svg className="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+                  </svg>
+                ) : (
+                  <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M7 4a3 3 0 016 0v4a3 3 0 11-6 0V4zm4 10.93A7.001 7.001 0 0017 8a1 1 0 10-2 0A5 5 0 015 8a1 1 0 00-2 0 7.001 7.001 0 006 6.93V17H6a1 1 0 100 2h8a1 1 0 100-2h-3v-2.07z" clipRule="evenodd" />
+                  </svg>
+                )}
               </button>
               <button
                 type="button"
                 onClick={() => setSpeechLang(speechLang === 'en-US' ? 'ja-JP' : 'en-US')}
-                disabled={isListening}
+                disabled={isRecording || isTranscribing}
                 className="text-[10px] font-bold text-gray-500 hover:text-indigo-600 disabled:opacity-50"
               >
                 {speechLang === 'en-US' ? 'EN' : 'JP'}
@@ -276,11 +328,11 @@ export default function ChatInterface() {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder={isListening ? '聞き取り中...' : 'メッセージを入力... (Enterで送信)'}
+            placeholder={isRecording ? '録音中... 停止ボタンを押してください' : isTranscribing ? '文字起こし中...' : 'メッセージを入力... (Enterで送信)'}
             rows={1}
             className="flex-1 resize-none rounded-2xl border border-gray-200 bg-gray-50 px-4 py-2.5 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent max-h-32"
             style={{ lineHeight: '1.5' }}
-            disabled={isListening}
+            disabled={isRecording}
           />
 
           <button

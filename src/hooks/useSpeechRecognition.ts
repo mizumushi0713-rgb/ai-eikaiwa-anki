@@ -5,90 +5,109 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 export type SpeechLang = 'en-US' | 'ja-JP';
 
 interface UseSpeechRecognitionReturn {
-  transcript: string;
-  isListening: boolean;
+  isRecording: boolean;
+  isTranscribing: boolean;
   isSupported: boolean;
   error: string;
-  startListening: (lang: SpeechLang) => void;
-  stopListening: () => void;
-  resetTranscript: () => void;
+  startRecording: (lang: SpeechLang) => void;
+  stopRecording: () => void;
+  onTranscript: (cb: (text: string) => void) => void;
 }
 
 export function useSpeechRecognition(): UseSpeechRecognitionReturn {
-  const [transcript, setTranscript] = useState('');
-  const [isListening, setIsListening] = useState(false);
+  const [isRecording, setIsRecording] = useState(false);
+  const [isTranscribing, setIsTranscribing] = useState(false);
   const [isSupported, setIsSupported] = useState(false);
   const [error, setError] = useState('');
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const recognitionRef = useRef<any>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
+  const callbackRef = useRef<((text: string) => void) | null>(null);
+  const langRef = useRef<SpeechLang>('en-US');
 
   useEffect(() => {
-    const w = window as any;
-    const SpeechRecognition = w.SpeechRecognition || w.webkitSpeechRecognition;
-    setIsSupported(!!SpeechRecognition);
+    setIsSupported(!!navigator.mediaDevices?.getUserMedia);
   }, []);
 
-  const startListening = useCallback((lang: SpeechLang) => {
-    setError('');
-    const w = window as any;
-    const SpeechRecognition = w.SpeechRecognition || w.webkitSpeechRecognition;
-    if (!SpeechRecognition) {
-      setError('このブラウザは音声入力に対応していません');
-      return;
+  const onTranscript = useCallback((cb: (text: string) => void) => {
+    callbackRef.current = cb;
+  }, []);
+
+  const sendToTranscribe = useCallback(async (blob: Blob, lang: SpeechLang) => {
+    setIsTranscribing(true);
+    try {
+      const formData = new FormData();
+      formData.append('audio', blob, 'recording.webm');
+      formData.append('lang', lang);
+
+      const res = await fetch('/api/transcribe', {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      if (data.text && callbackRef.current) {
+        callbackRef.current(data.text);
+      }
+    } catch (err) {
+      console.error('Transcribe error:', err);
+      setError('文字起こしに失敗しました。もう一度お試しください。');
+    } finally {
+      setIsTranscribing(false);
     }
-
-    const recognition = new SpeechRecognition();
-    recognition.lang = lang;
-    recognition.continuous = true;
-    recognition.interimResults = true;
-
-    recognition.onstart = () => setIsListening(true);
-
-    recognition.onresult = (event: any) => {
-      let finalText = '';
-      for (let i = 0; i < event.results.length; i++) {
-        finalText += event.results[i][0].transcript;
-      }
-      if (finalText) setTranscript(finalText.trim());
-    };
-
-    recognition.onerror = (event: any) => {
-      setIsListening(false);
-      switch (event.error) {
-        case 'not-allowed':
-          setError('マイクへのアクセスが拒否されました。ブラウザの設定で許可してください。');
-          break;
-        case 'network':
-          setError('音声入力にはHTTPS接続が必要です（Vercelでは動作します）。');
-          break;
-        case 'no-speech':
-          setError('音声が検出されませんでした。もう一度お試しください。');
-          break;
-        default:
-          setError(`音声入力エラー: ${event.error}`);
-      }
-    };
-
-    recognition.onend = () => setIsListening(false);
-
-    recognitionRef.current = recognition;
-    recognition.start();
   }, []);
 
-  const stopListening = useCallback(() => {
-    recognitionRef.current?.stop();
-    setIsListening(false);
-  }, []);
+  const startRecording = useCallback(async (lang: SpeechLang) => {
+    setError('');
+    langRef.current = lang;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mediaRecorder = new MediaRecorder(stream, {
+        mimeType: MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+          ? 'audio/webm;codecs=opus'
+          : 'audio/webm',
+      });
 
-  const resetTranscript = useCallback(() => setTranscript(''), []);
+      chunksRef.current = [];
+
+      mediaRecorder.ondataavailable = (e) => {
+        if (e.data.size > 0) chunksRef.current.push(e.data);
+      };
+
+      mediaRecorder.onstop = () => {
+        stream.getTracks().forEach((t) => t.stop());
+        const blob = new Blob(chunksRef.current, { type: 'audio/webm' });
+        if (blob.size > 0) {
+          sendToTranscribe(blob, langRef.current);
+        }
+      };
+
+      mediaRecorderRef.current = mediaRecorder;
+      mediaRecorder.start();
+      setIsRecording(true);
+    } catch (err: any) {
+      if (err?.name === 'NotAllowedError') {
+        setError('マイクへのアクセスが拒否されました。ブラウザの設定で許可してください。');
+      } else {
+        setError('マイクの起動に失敗しました。');
+      }
+    }
+  }, [sendToTranscribe]);
+
+  const stopRecording = useCallback(() => {
+    if (mediaRecorderRef.current?.state === 'recording') {
+      mediaRecorderRef.current.stop();
+    }
+    setIsRecording(false);
+  }, []);
 
   return {
-    transcript,
-    isListening,
+    isRecording,
+    isTranscribing,
     isSupported,
     error,
-    startListening,
-    stopListening,
-    resetTranscript,
+    startRecording,
+    stopRecording,
+    onTranscript,
   };
 }

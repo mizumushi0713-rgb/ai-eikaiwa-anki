@@ -1,0 +1,37 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Prevent iOS Safari overscroll bounce in chat */
+html, body {
+  overscroll-behavior: none;
+  height: 100%;
+}
+
+/* Safe area support for iPhone notch / home indicator */
+.safe-area-pb {
+  padding-bottom: max(12px, env(safe-area-inset-bottom));
+}
+
+/* Smooth textarea height adjustment */
+textarea {
+  overflow-y: auto;
+  field-sizing: content; /* Chrome 123+ */
+}
+
+/* Hide Next.js dev overlay badge */
+nextjs-portal {
+  display: none !important;
+}
+
+/* Custom scrollbar (subtle) */
+::-webkit-scrollbar {
+  width: 4px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #d1d5db;
+  border-radius: 2px;
+}

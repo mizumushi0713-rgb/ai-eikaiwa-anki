@@ -62,7 +62,10 @@ async function streamClaude(
 async function streamGemini(
   messages: { role: 'user' | 'assistant'; content: string }[]
 ): Promise<ReadableStream> {
-  const history = messages.slice(0, -1).map((m) => ({
+  // Gemini requires the first message to be 'user', so drop leading assistant messages
+  const trimmed = messages.slice(0, -1);
+  const firstUserIdx = trimmed.findIndex((m) => m.role === 'user');
+  const history = (firstUserIdx === -1 ? [] : trimmed.slice(firstUserIdx)).map((m) => ({
     role: m.role === 'user' ? 'user' : 'model',
     parts: [{ text: m.content }],
   }));

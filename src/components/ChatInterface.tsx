@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import MessageBubble from './MessageBubble';
 import AnkiExportModal from './AnkiExportModal';
+import LogImportModal from './LogImportModal';
 import { useSpeechRecognition, type SpeechLang } from '@/hooks/useSpeechRecognition';
 import type { Message, AnkiCard, AIProvider } from '@/lib/types';
 
@@ -23,6 +24,7 @@ export default function ChatInterface() {
   const [provider, setProvider] = useState<AIProvider>('gemini');
   const [speechLang, setSpeechLang] = useState<SpeechLang>('en-US');
   const [playingMsgId, setPlayingMsgId] = useState<string | null>(null);
+  const [showLogImport, setShowLogImport] = useState(false);
 
   const bottomRef = useRef<HTMLDivElement>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -215,6 +217,18 @@ export default function ChatInterface() {
             </button>
           </div>
 
+          {/* Log import */}
+          <button
+            onClick={() => setShowLogImport(true)}
+            title="外部の会話ログからAnkiデッキを作成"
+            className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold px-3 py-1.5 rounded-full transition-colors"
+          >
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+            </svg>
+            Log
+          </button>
+
           {/* Anki export */}
           <button
             onClick={handleExtractAnki}
@@ -352,6 +366,17 @@ export default function ChatInterface() {
 
       {ankiCards && (
         <AnkiExportModal cards={ankiCards} onClose={() => setAnkiCards(null)} />
+      )}
+
+      {showLogImport && (
+        <LogImportModal
+          provider={provider}
+          onCardsExtracted={(cards) => {
+            setShowLogImport(false);
+            setAnkiCards(cards);
+          }}
+          onClose={() => setShowLogImport(false)}
+        />
       )}
     </div>
   );

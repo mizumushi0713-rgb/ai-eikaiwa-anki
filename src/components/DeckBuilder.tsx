@@ -17,6 +17,7 @@ const MAX_FILE_SIZE = 3 * 1024 * 1024; // 3MB
 export default function DeckBuilder() {
   const [file, setFile] = useState<File | null>(null);
   const [format, setFormat] = useState<DeckFormat>('auto');
+  const [customInstruction, setCustomInstruction] = useState('');
   const [deckName, setDeckName] = useState('');
   const [cards, setCards] = useState<DeckCard[]>([]);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
@@ -66,7 +67,12 @@ export default function DeckBuilder() {
       const res = await fetch('/api/analyze-file', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ fileData: base64, mimeType: file.type, format }),
+        body: JSON.stringify({
+          fileData: base64,
+          mimeType: file.type,
+          format,
+          customInstruction: customInstruction.trim() || undefined,
+        }),
       });
 
       if (!res.ok) {
@@ -230,6 +236,23 @@ export default function DeckBuilder() {
               </label>
             ))}
           </div>
+        </div>
+
+        {/* Custom Instruction */}
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            AIへの追加指示 <span className="text-gray-400 font-normal">（任意）</span>
+          </label>
+          <textarea
+            value={customInstruction}
+            onChange={(e) => setCustomInstruction(e.target.value)}
+            placeholder="例：重要語を赤字で強調して&#10;例：なるべく文章を残して文脈の中で問題を出して&#10;例：第3章の動詞だけ抽出して"
+            rows={3}
+            className="w-full rounded-xl border border-gray-300 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent resize-none"
+          />
+          <p className="text-xs text-gray-400 mt-1">
+            HTMLタグ（&lt;span style=&quot;color:red&quot;&gt;...&lt;/span&gt;など）も使えます
+          </p>
         </div>
 
         {error && (

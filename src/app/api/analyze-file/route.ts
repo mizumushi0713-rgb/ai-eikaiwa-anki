@@ -10,7 +10,7 @@ const GEMINI_MODELS = [
   'gemini-3.1-flash-lite-preview',
 ];
 
-function buildPrompt(format: DeckFormat): string {
+function buildPrompt(format: DeckFormat, customInstruction?: string): string {
   const formatInstructions: Record<DeckFormat, string> = {
     auto: '教材の性質に最も適した形式を自動判断してください。一問一答、穴埋め、対話形式などを混在させても構いません。',
     basic: '表面（front）に用語・問い、裏面（back）に答え・定義を配置してください。type は "basic" のみ使用。',
@@ -19,11 +19,16 @@ function buildPrompt(format: DeckFormat): string {
     detailed: '裏面（back）には答えだけでなく、教材内の関連解説・文脈も詳しく含めてください。type は "basic" を使用。',
   };
 
+  const customSection = customInstruction?.trim()
+    ? `\n\n【ユーザーからの追加指示（最優先で従うこと）】\n${customInstruction.trim()}\n` +
+      `※HTMLタグ（<span style="color:red">...</span> や <b>...</b> など）を front/back に含めて装飾しても構いません。`
+    : '';
+
   return `あなたはAnkiフラッシュカード作成の専門家です。
 提供された教材（PDF・画像）を分析し、学習に役立つカードを生成してください。
 
 【カード形式の指示】
-${formatInstructions[format]}
+${formatInstructions[format]}${customSection}
 
 以下のJSON形式のみで返してください（コードブロック不要）：
 {"cards":[{"front":"表面テキスト","back":"裏面テキスト","tags":["タグ1"],"type":"basic"}]}
@@ -58,15 +63,16 @@ export async function POST(req: NextRequest) {
       fileData: string;
       mimeType: string;
       format: DeckFormat;
+      customInstruction?: string;
     };
 
-    const { fileData, mimeType, format = 'auto' } = body;
+    const { fileData, mimeType, format = 'auto', customInstruction } = body;
 
     if (!fileData || !mimeType) {
       return Response.json({ error: 'ファイルデータが必要です' }, { status: 400 });
     }
 
-    const prompt = buildPrompt(format);
+    const prompt = buildPrompt(format, customInstruction);
     let lastError: unknown;
 
     for (const modelId of GEMINI_MODELS) {

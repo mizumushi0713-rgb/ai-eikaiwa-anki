@@ -23,6 +23,18 @@ export interface AnkiCard {
 /** Which side shows first in Anki */
 export type ExportPattern = 'en-to-ja' | 'ja-to-en';
 
+// ─── Deck Builder ────────────────────────────────────────────────────────────
+
+export interface DeckCard {
+  id: string;
+  front: string;
+  back: string;
+  tags: string[];
+  type: 'basic' | 'cloze';
+}
+
+export type DeckFormat = 'auto' | 'basic' | 'cloze' | 'dialogue' | 'detailed';
+
 // ─── AI Provider ─────────────────────────────────────────────────────────────
 
 export type AIProvider = 'claude' | 'gemini';

@@ -7,7 +7,38 @@ import JSZip from 'jszip';
 import { createHash } from 'crypto';
 import path from 'path';
 import fs from 'fs';
-import type { DeckCard } from './types';
+import type { DeckCard, CardStyle } from './types';
+
+const DEFAULT_STYLE: Required<CardStyle> = {
+  frontColor: '#1a1a2e',
+  frontColorDark: '#ffffff',
+  frontFontSize: 22,
+  backColor: '#333333',
+  backColorDark: '#e8e8e8',
+  backFontSize: 16,
+  backBold: false,
+};
+
+function buildCss(style?: CardStyle): string {
+  const s = { ...DEFAULT_STYLE, ...(style ?? {}) };
+  return `.card {
+  font-family: "Helvetica Neue", Arial, sans-serif;
+  font-size: 18px;
+  color: ${s.frontColor};
+  background: #ffffff;
+  padding: 20px;
+  line-height: 1.7;
+}
+.front { font-size: ${s.frontFontSize}px; font-weight: bold; margin-bottom: 12px; text-align: center; color: ${s.frontColor}; }
+.back { font-size: ${s.backFontSize}px; color: ${s.backColor}; ${s.backBold ? 'font-weight: bold; ' : ''}white-space: pre-wrap; text-align: left; }
+hr#answer { border: none; border-top: 2px solid #e0e0e0; margin: 16px 0; }
+.cloze { font-weight: bold; color: #3b82f6; }
+.nightMode.card, .night_mode .card { color: ${s.frontColorDark}; background: #1a1a1a; }
+.nightMode .back, .night_mode .back { color: ${s.backColorDark}; }
+.nightMode .front, .night_mode .front { color: ${s.frontColorDark}; }
+.nightMode hr#answer, .night_mode hr#answer { border-top-color: #555; }
+.nightMode .cloze, .night_mode .cloze { color: #60a5fa; }`;
+}
 
 // Fixed IDs — separate from the chat deck to avoid merge conflicts
 const DECK_ID = 1700000000010;
@@ -32,25 +63,7 @@ function generateGuid(): string {
   return result;
 }
 
-const CSS = `.card {
-  font-family: "Helvetica Neue", Arial, sans-serif;
-  font-size: 18px;
-  color: #1a1a2e;
-  background: #ffffff;
-  padding: 20px;
-  line-height: 1.7;
-}
-.front { font-size: 22px; font-weight: bold; margin-bottom: 12px; text-align: center; }
-.back { font-size: 16px; color: #333; white-space: pre-wrap; text-align: left; }
-hr#answer { border: none; border-top: 2px solid #e0e0e0; margin: 16px 0; }
-.cloze { font-weight: bold; color: #3b82f6; }
-.nightMode.card, .night_mode .card { color: #f0f0f0; background: #1a1a1a; }
-.nightMode .back, .night_mode .back { color: #e8e8e8; }
-.nightMode .front, .night_mode .front { color: #ffffff; }
-.nightMode hr#answer, .night_mode hr#answer { border-top-color: #555; }
-.nightMode .cloze, .night_mode .cloze { color: #60a5fa; }`;
-
-function buildBasicModel() {
+function buildBasicModel(css: string) {
   return {
     id: String(MODEL_ID_BASIC),
     name: '学習カード（ベーシック）',
@@ -74,7 +87,7 @@ function buildBasicModel() {
       { name: 'Front', ord: 0, sticky: false, rtl: false, font: 'Arial', size: 20, media: [] },
       { name: 'Back', ord: 1, sticky: false, rtl: false, font: 'Arial', size: 20, media: [] },
     ],
-    css: CSS,
+    css,
     latexPre: '',
     latexPost: '',
     tags: [],
@@ -82,7 +95,7 @@ function buildBasicModel() {
   };
 }
 
-function buildClozeModel() {
+function buildClozeModel(css: string) {
   return {
     id: String(MODEL_ID_CLOZE),
     name: '学習カード（穴埋め）',
@@ -106,7 +119,7 @@ function buildClozeModel() {
       { name: 'Text', ord: 0, sticky: false, rtl: false, font: 'Arial', size: 20, media: [] },
       { name: 'Extra', ord: 1, sticky: false, rtl: false, font: 'Arial', size: 20, media: [] },
     ],
-    css: CSS,
+    css,
     latexPre: '',
     latexPost: '',
     tags: [],
@@ -116,8 +129,10 @@ function buildClozeModel() {
 
 export async function generateApkgFromDeckCards(
   cards: DeckCard[],
-  deckName: string
+  deckName: string,
+  style?: CardStyle
 ): Promise<Buffer> {
+  const css = buildCss(style);
   const wasmPath = path.join(process.cwd(), 'public', 'sql-wasm.wasm');
   const wasmBinary = fs.readFileSync(wasmPath);
   const SQL = await initSqlJs({ wasmBinary: wasmBinary.buffer as ArrayBuffer });
@@ -141,8 +156,8 @@ export async function generateApkgFromDeckCards(
   const hasCloze = cards.some((c) => c.type === 'cloze');
 
   const models: Record<string, unknown> = {};
-  if (hasBasic) models[String(MODEL_ID_BASIC)] = buildBasicModel();
-  if (hasCloze) models[String(MODEL_ID_CLOZE)] = buildClozeModel();
+  if (hasBasic) models[String(MODEL_ID_BASIC)] = buildBasicModel(css);
+  if (hasCloze) models[String(MODEL_ID_CLOZE)] = buildClozeModel(css);
 
   const deck = {
     [String(DECK_ID)]: {

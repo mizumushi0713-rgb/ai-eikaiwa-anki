@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server';
 import { generateApkgFromDeckCards } from '@/lib/deck-generator';
-import type { DeckCard } from '@/lib/types';
+import type { DeckCard, CardStyle } from '@/lib/types';
 
 export async function POST(req: NextRequest) {
   try {
@@ -9,6 +9,7 @@ export async function POST(req: NextRequest) {
     const contentType = req.headers.get('content-type') || '';
     let cards: DeckCard[] = [];
     let deckName = '学習デッキ';
+    let cardStyle: CardStyle | undefined;
 
     if (contentType.includes('application/x-www-form-urlencoded') || contentType.includes('multipart/form-data')) {
       const form = await req.formData();
@@ -16,20 +17,22 @@ export async function POST(req: NextRequest) {
       if (typeof raw !== 'string') {
         return new Response('Missing payload', { status: 400 });
       }
-      const parsed = JSON.parse(raw) as { cards: DeckCard[]; deckName?: string };
+      const parsed = JSON.parse(raw) as { cards: DeckCard[]; deckName?: string; cardStyle?: CardStyle };
       cards = parsed.cards;
       if (parsed.deckName) deckName = parsed.deckName;
+      cardStyle = parsed.cardStyle;
     } else {
-      const body = await req.json() as { cards: DeckCard[]; deckName?: string };
+      const body = await req.json() as { cards: DeckCard[]; deckName?: string; cardStyle?: CardStyle };
       cards = body.cards;
       if (body.deckName) deckName = body.deckName;
+      cardStyle = body.cardStyle;
     }
 
     if (!cards || cards.length === 0) {
       return new Response('No cards provided', { status: 400 });
     }
 
-    const apkgBuffer = await generateApkgFromDeckCards(cards, deckName);
+    const apkgBuffer = await generateApkgFromDeckCards(cards, deckName, cardStyle);
     const date = new Date().toISOString().slice(0, 10);
     const filename = `${deckName}_${date}.apkg`;
 

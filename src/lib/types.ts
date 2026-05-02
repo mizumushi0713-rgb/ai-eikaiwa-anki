@@ -35,6 +35,24 @@ export interface DeckCard {
 
 export type DeckFormat = 'auto' | 'basic' | 'cloze' | 'dialogue' | 'detailed';
 
+/** User-controlled visual style applied to generated Anki cards. */
+export interface CardStyle {
+  /** Front text color in light mode (hex). */
+  frontColor?: string;
+  /** Front text color in night mode (hex). */
+  frontColorDark?: string;
+  /** Front font size in pixels. */
+  frontFontSize?: number;
+  /** Back text color in light mode (hex). */
+  backColor?: string;
+  /** Back text color in night mode (hex). */
+  backColorDark?: string;
+  /** Back font size in pixels. */
+  backFontSize?: number;
+  /** Whether to bold the back text. */
+  backBold?: boolean;
+}
+
 // ─── AI Provider ─────────────────────────────────────────────────────────────
 
 export type AIProvider = 'claude' | 'gemini';

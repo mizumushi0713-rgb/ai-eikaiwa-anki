@@ -2,7 +2,7 @@
 
 import { useState, useRef } from 'react';
 import Link from 'next/link';
-import type { DeckCard, DeckFormat } from '@/lib/types';
+import type { DeckCard, DeckFormat, CardStyle } from '@/lib/types';
 
 const FORMAT_OPTIONS: { value: DeckFormat; label: string; desc: string }[] = [
   { value: 'auto', label: 'おまかせ', desc: 'AIが最適な形式を自動判断' },
@@ -15,6 +15,16 @@ const FORMAT_OPTIONS: { value: DeckFormat; label: string; desc: string }[] = [
 const MAX_FILE_SIZE = 3 * 1024 * 1024; // 3MB per file
 const MAX_TOTAL_SIZE = 4 * 1024 * 1024; // 4MB total (Vercel hobby request body limit ~4.5MB)
 
+const DEFAULT_CARD_STYLE: Required<CardStyle> = {
+  frontColor: '#1a1a2e',
+  frontColorDark: '#ffffff',
+  frontFontSize: 22,
+  backColor: '#333333',
+  backColorDark: '#e8e8e8',
+  backFontSize: 16,
+  backBold: false,
+};
+
 export default function DeckBuilder() {
   const [files, setFiles] = useState<File[]>([]);
   const [format, setFormat] = useState<DeckFormat>('auto');
@@ -25,7 +35,13 @@ export default function DeckBuilder() {
   const [isExporting, setIsExporting] = useState(false);
   const [error, setError] = useState('');
   const [isDragOver, setIsDragOver] = useState(false);
+  const [cardStyle, setCardStyle] = useState<Required<CardStyle>>(DEFAULT_CARD_STYLE);
+  const [showStyle, setShowStyle] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const updateStyle = <K extends keyof CardStyle>(key: K, value: Required<CardStyle>[K]) => {
+    setCardStyle((prev) => ({ ...prev, [key]: value }));
+  };
 
   const VALID_TYPES = ['application/pdf', 'image/jpeg', 'image/png', 'image/webp'];
 
@@ -155,7 +171,7 @@ export default function DeckBuilder() {
       const payload = document.createElement('input');
       payload.type = 'hidden';
       payload.name = 'payload';
-      payload.value = JSON.stringify({ cards, deckName: deckName || '学習デッキ' });
+      payload.value = JSON.stringify({ cards, deckName: deckName || '学習デッキ', cardStyle });
       form.appendChild(payload);
 
       document.body.appendChild(form);
@@ -304,6 +320,197 @@ export default function DeckBuilder() {
               </label>
             ))}
           </div>
+        </div>
+
+        {/* Card Style */}
+        <div>
+          <button
+            type="button"
+            onClick={() => setShowStyle((v) => !v)}
+            className="w-full flex items-center justify-between text-sm font-medium text-gray-700 mb-2"
+          >
+            <span>カードスタイル <span className="text-gray-400 font-normal">（任意）</span></span>
+            <svg
+              className={`w-4 h-4 text-gray-400 transition-transform ${showStyle ? 'rotate-180' : ''}`}
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+            </svg>
+          </button>
+
+          {showStyle && (
+            <div className="bg-white border border-gray-200 rounded-xl p-4 space-y-4">
+              {/* Preview */}
+              <div className="rounded-lg border border-gray-200 overflow-hidden">
+                <div className="bg-white p-3" style={{ color: cardStyle.frontColor }}>
+                  <div
+                    className="text-center mb-2"
+                    style={{ fontSize: `${cardStyle.frontFontSize}px`, fontWeight: 'bold', color: cardStyle.frontColor }}
+                  >
+                    表面プレビュー
+                  </div>
+                  <hr className="my-2 border-gray-200" />
+                  <div
+                    style={{
+                      fontSize: `${cardStyle.backFontSize}px`,
+                      color: cardStyle.backColor,
+                      fontWeight: cardStyle.backBold ? 'bold' : 'normal',
+                    }}
+                  >
+                    裏面プレビュー：これは裏面の表示サンプルです。
+                  </div>
+                </div>
+                <div className="p-3" style={{ background: '#1a1a1a' }}>
+                  <div
+                    className="text-center mb-2"
+                    style={{
+                      fontSize: `${cardStyle.frontFontSize}px`,
+                      fontWeight: 'bold',
+                      color: cardStyle.frontColorDark,
+                    }}
+                  >
+                    表面プレビュー（ダーク）
+                  </div>
+                  <hr className="my-2 border-gray-700" />
+                  <div
+                    style={{
+                      fontSize: `${cardStyle.backFontSize}px`,
+                      color: cardStyle.backColorDark,
+                      fontWeight: cardStyle.backBold ? 'bold' : 'normal',
+                    }}
+                  >
+                    裏面プレビュー：ダークモードでの見え方
+                  </div>
+                </div>
+              </div>
+
+              {/* Front controls */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1">表面 文字色（ライト）</label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="color"
+                      value={cardStyle.frontColor}
+                      onChange={(e) => updateStyle('frontColor', e.target.value)}
+                      className="w-9 h-9 rounded border border-gray-300 cursor-pointer flex-shrink-0"
+                    />
+                    <input
+                      type="text"
+                      value={cardStyle.frontColor}
+                      onChange={(e) => updateStyle('frontColor', e.target.value)}
+                      className="flex-1 min-w-0 text-xs border border-gray-300 rounded px-2 py-1.5 font-mono"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1">表面 文字色（ダーク）</label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="color"
+                      value={cardStyle.frontColorDark}
+                      onChange={(e) => updateStyle('frontColorDark', e.target.value)}
+                      className="w-9 h-9 rounded border border-gray-300 cursor-pointer flex-shrink-0"
+                    />
+                    <input
+                      type="text"
+                      value={cardStyle.frontColorDark}
+                      onChange={(e) => updateStyle('frontColorDark', e.target.value)}
+                      className="flex-1 min-w-0 text-xs border border-gray-300 rounded px-2 py-1.5 font-mono"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">
+                  表面 文字サイズ：<span className="font-mono text-gray-700">{cardStyle.frontFontSize}px</span>
+                </label>
+                <input
+                  type="range"
+                  min={14}
+                  max={40}
+                  step={1}
+                  value={cardStyle.frontFontSize}
+                  onChange={(e) => updateStyle('frontFontSize', Number(e.target.value))}
+                  className="w-full accent-indigo-600"
+                />
+              </div>
+
+              {/* Back controls */}
+              <div className="grid grid-cols-2 gap-3 pt-2 border-t border-gray-100">
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1">裏面 文字色（ライト）</label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="color"
+                      value={cardStyle.backColor}
+                      onChange={(e) => updateStyle('backColor', e.target.value)}
+                      className="w-9 h-9 rounded border border-gray-300 cursor-pointer flex-shrink-0"
+                    />
+                    <input
+                      type="text"
+                      value={cardStyle.backColor}
+                      onChange={(e) => updateStyle('backColor', e.target.value)}
+                      className="flex-1 min-w-0 text-xs border border-gray-300 rounded px-2 py-1.5 font-mono"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1">裏面 文字色（ダーク）</label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="color"
+                      value={cardStyle.backColorDark}
+                      onChange={(e) => updateStyle('backColorDark', e.target.value)}
+                      className="w-9 h-9 rounded border border-gray-300 cursor-pointer flex-shrink-0"
+                    />
+                    <input
+                      type="text"
+                      value={cardStyle.backColorDark}
+                      onChange={(e) => updateStyle('backColorDark', e.target.value)}
+                      className="flex-1 min-w-0 text-xs border border-gray-300 rounded px-2 py-1.5 font-mono"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">
+                  裏面 文字サイズ：<span className="font-mono text-gray-700">{cardStyle.backFontSize}px</span>
+                </label>
+                <input
+                  type="range"
+                  min={12}
+                  max={32}
+                  step={1}
+                  value={cardStyle.backFontSize}
+                  onChange={(e) => updateStyle('backFontSize', Number(e.target.value))}
+                  className="w-full accent-indigo-600"
+                />
+              </div>
+
+              <label className="flex items-center gap-2 text-xs text-gray-600">
+                <input
+                  type="checkbox"
+                  checked={cardStyle.backBold}
+                  onChange={(e) => updateStyle('backBold', e.target.checked)}
+                  className="accent-indigo-600"
+                />
+                裏面を太字にする
+              </label>
+
+              <button
+                type="button"
+                onClick={() => setCardStyle(DEFAULT_CARD_STYLE)}
+                className="text-xs text-indigo-600 hover:text-indigo-700 font-medium"
+              >
+                既定値に戻す
+              </button>
+            </div>
+          )}
         </div>
 
         {/* Custom Instruction */}

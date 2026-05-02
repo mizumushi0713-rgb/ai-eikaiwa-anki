@@ -12,10 +12,11 @@ const FORMAT_OPTIONS: { value: DeckFormat; label: string; desc: string }[] = [
   { value: 'detailed', label: '解説付き', desc: '裏面に答えと詳しい解説を含む' },
 ];
 
-const MAX_FILE_SIZE = 3 * 1024 * 1024; // 3MB
+const MAX_FILE_SIZE = 3 * 1024 * 1024; // 3MB per file
+const MAX_TOTAL_SIZE = 4 * 1024 * 1024; // 4MB total (Vercel hobby request body limit ~4.5MB)
 
 export default function DeckBuilder() {
-  const [file, setFile] = useState<File | null>(null);
+  const [files, setFiles] = useState<File[]>([]);
   const [format, setFormat] = useState<DeckFormat>('auto');
   const [customInstruction, setCustomInstruction] = useState('');
   const [deckName, setDeckName] = useState('');
@@ -26,50 +27,82 @@ export default function DeckBuilder() {
   const [isDragOver, setIsDragOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const handleFile = (f: File) => {
-    const validTypes = ['application/pdf', 'image/jpeg', 'image/png', 'image/webp'];
-    if (!validTypes.includes(f.type)) {
-      setError('PDF、JPG、PNG、WebPファイルのみ対応しています。');
-      return;
+  const VALID_TYPES = ['application/pdf', 'image/jpeg', 'image/png', 'image/webp'];
+
+  const addFiles = (newFiles: File[]) => {
+    const accepted: File[] = [];
+    const rejected: string[] = [];
+
+    for (const f of newFiles) {
+      if (!VALID_TYPES.includes(f.type)) {
+        rejected.push(`${f.name}（非対応形式）`);
+        continue;
+      }
+      if (f.size > MAX_FILE_SIZE) {
+        rejected.push(`${f.name}（${(f.size / 1024 / 1024).toFixed(1)}MB > 3MB）`);
+        continue;
+      }
+      accepted.push(f);
     }
-    if (f.size > MAX_FILE_SIZE) {
-      setError(`ファイルサイズが大きすぎます（最大3MB）。現在: ${(f.size / 1024 / 1024).toFixed(1)}MB`);
-      return;
+
+    setFiles((prev) => {
+      const combined = [...prev, ...accepted];
+      const total = combined.reduce((sum, f) => sum + f.size, 0);
+      if (total > MAX_TOTAL_SIZE) {
+        setError(`合計サイズが大きすぎます（最大4MB）。現在: ${(total / 1024 / 1024).toFixed(1)}MB`);
+        return prev;
+      }
+      return combined;
+    });
+
+    if (rejected.length > 0) {
+      setError(`一部のファイルを追加できませんでした: ${rejected.join(', ')}`);
+    } else if (accepted.length > 0) {
+      setError('');
     }
-    setFile(f);
-    setError('');
-    if (!deckName) setDeckName(f.name.replace(/\.[^.]+$/, ''));
+
+    if (accepted.length > 0 && !deckName) {
+      setDeckName(accepted[0].name.replace(/\.[^.]+$/, ''));
+    }
+  };
+
+  const removeFile = (idx: number) => {
+    setFiles((prev) => prev.filter((_, i) => i !== idx));
   };
 
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
     setIsDragOver(false);
-    const f = e.dataTransfer.files[0];
-    if (f) handleFile(f);
+    const dropped = Array.from(e.dataTransfer.files);
+    if (dropped.length > 0) addFiles(dropped);
   };
 
   const handleAnalyze = async () => {
-    if (!file || isAnalyzing) return;
+    if (files.length === 0 || isAnalyzing) return;
     setIsAnalyzing(true);
     setError('');
 
     try {
-      const base64 = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => {
-          const result = reader.result as string;
-          resolve(result.split(',')[1]);
-        };
-        reader.onerror = reject;
-        reader.readAsDataURL(file);
-      });
+      const fileList = await Promise.all(
+        files.map(
+          (file) =>
+            new Promise<{ fileData: string; mimeType: string }>((resolve, reject) => {
+              const reader = new FileReader();
+              reader.onload = () => {
+                const result = reader.result as string;
+                resolve({ fileData: result.split(',')[1], mimeType: file.type });
+              };
+              reader.onerror = reject;
+              reader.readAsDataURL(file);
+            })
+        )
+      );
 
       const res = await fetch('/api/analyze-file', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          fileData: base64,
-          mimeType: file.type,
+          files: fileList,
           format,
           customInstruction: customInstruction.trim() || undefined,
         }),
@@ -104,33 +137,35 @@ export default function DeckBuilder() {
     ]);
   };
 
-  const handleExport = async () => {
+  const handleExport = () => {
     if (cards.length === 0 || isExporting) return;
     setIsExporting(true);
     setError('');
 
+    // Native form POST submission triggers a real browser download with the
+    // server-supplied filename (Content-Disposition). This is the only reliable
+    // path on mobile Safari/Chrome where blob URL + a.download is unreliable.
     try {
-      const res = await fetch('/api/generate-deck-apkg', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ cards, deckName: deckName || '学習デッキ' }),
-      });
+      const form = document.createElement('form');
+      form.method = 'POST';
+      form.action = '/api/generate-deck-apkg';
+      form.enctype = 'application/x-www-form-urlencoded';
+      form.style.display = 'none';
 
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const payload = document.createElement('input');
+      payload.type = 'hidden';
+      payload.name = 'payload';
+      payload.value = JSON.stringify({ cards, deckName: deckName || '学習デッキ' });
+      form.appendChild(payload);
 
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `${deckName || '学習デッキ'}_${new Date().toISOString().slice(0, 10)}.apkg`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
+      document.body.appendChild(form);
+      form.submit();
+      document.body.removeChild(form);
     } catch {
       setError('エクスポートに失敗しました。もう一度お試しください。');
     } finally {
-      setIsExporting(false);
+      // Slight delay to let the browser pick up the response.
+      setTimeout(() => setIsExporting(false), 1500);
     }
   };
 
@@ -160,10 +195,10 @@ export default function DeckBuilder() {
           onDragOver={(e) => { e.preventDefault(); setIsDragOver(true); }}
           onDragLeave={() => setIsDragOver(false)}
           onClick={() => fileInputRef.current?.click()}
-          className={`border-2 border-dashed rounded-2xl p-8 text-center cursor-pointer transition-colors ${
+          className={`border-2 border-dashed rounded-2xl p-6 text-center cursor-pointer transition-colors ${
             isDragOver
               ? 'border-indigo-400 bg-indigo-50'
-              : file
+              : files.length > 0
               ? 'border-green-300 bg-green-50'
               : 'border-gray-300 hover:border-indigo-300 hover:bg-gray-100'
           }`}
@@ -172,18 +207,23 @@ export default function DeckBuilder() {
             ref={fileInputRef}
             type="file"
             accept=".pdf,image/jpeg,image/png,image/webp"
+            multiple
             className="hidden"
-            onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f); }}
+            onChange={(e) => {
+              const selected = Array.from(e.target.files ?? []);
+              if (selected.length > 0) addFiles(selected);
+              if (fileInputRef.current) fileInputRef.current.value = '';
+            }}
           />
-          {file ? (
+          {files.length > 0 ? (
             <div>
-              <svg className="w-8 h-8 text-green-500 mx-auto mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <svg className="w-7 h-7 text-green-500 mx-auto mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
               </svg>
-              <p className="font-medium text-green-700 text-sm">{file.name}</p>
-              <p className="text-xs text-gray-400 mt-1">
-                {(file.size / 1024).toFixed(0)} KB · タップして変更
+              <p className="text-sm font-medium text-green-700">
+                {files.length}個のファイルを選択中
               </p>
+              <p className="text-xs text-gray-400 mt-1">タップして追加</p>
             </div>
           ) : (
             <div>
@@ -191,10 +231,38 @@ export default function DeckBuilder() {
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
               </svg>
               <p className="text-sm font-medium text-gray-600">PDFまたは画像をアップロード</p>
-              <p className="text-xs text-gray-400 mt-1">PDF / JPG / PNG / WebP · 最大3MB</p>
+              <p className="text-xs text-gray-400 mt-1">複数選択可 · PDF / JPG / PNG / WebP · 各3MB / 合計4MB</p>
             </div>
           )}
         </div>
+
+        {/* Selected files list */}
+        {files.length > 0 && (
+          <ul className="bg-white rounded-xl border border-gray-200 divide-y divide-gray-100 -mt-2">
+            {files.map((f, idx) => (
+              <li key={`${f.name}-${idx}`} className="flex items-center justify-between px-3 py-2 text-sm">
+                <div className="flex items-center gap-2 min-w-0">
+                  <svg className="w-4 h-4 text-gray-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                  </svg>
+                  <span className="truncate text-gray-700">{f.name}</span>
+                  <span className="text-xs text-gray-400 flex-shrink-0">
+                    {(f.size / 1024).toFixed(0)}KB
+                  </span>
+                </div>
+                <button
+                  onClick={(e) => { e.stopPropagation(); removeFile(idx); }}
+                  className="text-gray-300 hover:text-red-400 flex-shrink-0 ml-2"
+                  title="削除"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
 
         {/* Deck Name */}
         <div>
@@ -264,7 +332,7 @@ export default function DeckBuilder() {
         {/* Generate Button */}
         <button
           onClick={handleAnalyze}
-          disabled={!file || isAnalyzing}
+          disabled={files.length === 0 || isAnalyzing}
           className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-300 text-white font-semibold rounded-xl transition-colors flex items-center justify-center gap-2 text-sm"
         >
           {isAnalyzing ? (

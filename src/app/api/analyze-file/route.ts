@@ -60,15 +60,24 @@ function parseCards(rawText: string): DeckCard[] {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json() as {
-      fileData: string;
-      mimeType: string;
+      // New API: multiple files
+      files?: Array<{ fileData: string; mimeType: string }>;
+      // Legacy API: single file (kept for backward compat)
+      fileData?: string;
+      mimeType?: string;
       format: DeckFormat;
       customInstruction?: string;
     };
 
-    const { fileData, mimeType, format = 'auto', customInstruction } = body;
+    const { files, fileData, mimeType, format = 'auto', customInstruction } = body;
 
-    if (!fileData || !mimeType) {
+    const fileList = files && files.length > 0
+      ? files
+      : fileData && mimeType
+        ? [{ fileData, mimeType }]
+        : [];
+
+    if (fileList.length === 0) {
       return Response.json({ error: 'ファイルデータが必要です' }, { status: 400 });
     }
 
@@ -78,10 +87,13 @@ export async function POST(req: NextRequest) {
     for (const modelId of GEMINI_MODELS) {
       try {
         const model = genAI.getGenerativeModel({ model: modelId });
-        const result = await model.generateContent([
-          { inlineData: { mimeType, data: fileData } },
-          prompt,
-        ]);
+        const parts = [
+          ...fileList.map((f) => ({
+            inlineData: { mimeType: f.mimeType, data: f.fileData },
+          })),
+          { text: prompt },
+        ];
+        const result = await model.generateContent(parts);
 
         const rawText = result.response.text();
         const cards = parseCards(rawText);

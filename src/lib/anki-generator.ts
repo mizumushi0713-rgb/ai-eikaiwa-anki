@@ -57,7 +57,11 @@ const CSS = `.card {
 }
 .front { font-size: 24px; font-weight: bold; margin-bottom: 12px; }
 .back { font-size: 16px; color: #444; white-space: pre-wrap; text-align: left; }
-hr#answer { border: none; border-top: 2px solid #e0e0e0; margin: 16px 0; }`;
+hr#answer { border: none; border-top: 2px solid #e0e0e0; margin: 16px 0; }
+.nightMode.card, .night_mode .card { color: #f0f0f0; background-color: #1a1a1a; }
+.nightMode .back, .night_mode .back { color: #e8e8e8; }
+.nightMode .front, .night_mode .front { color: #ffffff; }
+.nightMode hr#answer, .night_mode hr#answer { border-top-color: #555; }`;
 
 function buildModel(pattern: ExportPattern) {
   const id = pattern === 'en-to-ja' ? MODEL_ID_EN_TO_JA : MODEL_ID_JA_TO_EN;

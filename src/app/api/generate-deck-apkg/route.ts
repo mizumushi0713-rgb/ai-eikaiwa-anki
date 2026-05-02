@@ -4,8 +4,26 @@ import type { DeckCard } from '@/lib/types';
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json() as { cards: DeckCard[]; deckName: string };
-    const { cards, deckName = '学習デッキ' } = body;
+    // Accept either JSON (fetch path) or form-urlencoded with `payload`
+    // (form.submit() path used for reliable mobile downloads).
+    const contentType = req.headers.get('content-type') || '';
+    let cards: DeckCard[] = [];
+    let deckName = '学習デッキ';
+
+    if (contentType.includes('application/x-www-form-urlencoded') || contentType.includes('multipart/form-data')) {
+      const form = await req.formData();
+      const raw = form.get('payload');
+      if (typeof raw !== 'string') {
+        return new Response('Missing payload', { status: 400 });
+      }
+      const parsed = JSON.parse(raw) as { cards: DeckCard[]; deckName?: string };
+      cards = parsed.cards;
+      if (parsed.deckName) deckName = parsed.deckName;
+    } else {
+      const body = await req.json() as { cards: DeckCard[]; deckName?: string };
+      cards = body.cards;
+      if (body.deckName) deckName = body.deckName;
+    }
 
     if (!cards || cards.length === 0) {
       return new Response('No cards provided', { status: 400 });

@@ -43,7 +43,12 @@ const CSS = `.card {
 .front { font-size: 22px; font-weight: bold; margin-bottom: 12px; text-align: center; }
 .back { font-size: 16px; color: #333; white-space: pre-wrap; text-align: left; }
 hr#answer { border: none; border-top: 2px solid #e0e0e0; margin: 16px 0; }
-.cloze { font-weight: bold; color: #3b82f6; }`;
+.cloze { font-weight: bold; color: #3b82f6; }
+.nightMode.card, .night_mode .card { color: #f0f0f0; background: #1a1a1a; }
+.nightMode .back, .night_mode .back { color: #e8e8e8; }
+.nightMode .front, .night_mode .front { color: #ffffff; }
+.nightMode hr#answer, .night_mode hr#answer { border-top-color: #555; }
+.nightMode .cloze, .night_mode .cloze { color: #60a5fa; }`;
 
 function buildBasicModel() {
   return {

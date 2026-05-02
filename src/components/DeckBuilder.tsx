@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import Link from 'next/link';
 import type { DeckCard, DeckFormat, CardStyle } from '@/lib/types';
 
@@ -81,15 +81,46 @@ export default function DeckBuilder() {
   const [files, setFiles] = useState<File[]>([]);
   const [format, setFormat] = useState<DeckFormat>('auto');
   const [customInstruction, setCustomInstruction] = useState('');
+  const [instructionHistory, setInstructionHistory] = useState<string[]>([]);
+  const [showHistory, setShowHistory] = useState(false);
   const [deckName, setDeckName] = useState('');
   const [cards, setCards] = useState<DeckCard[]>([]);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
+  const [refiningCardId, setRefiningCardId] = useState<string | null>(null);
+  const [isQualityChecking, setIsQualityChecking] = useState(false);
+  const [qualityMessage, setQualityMessage] = useState('');
   const [error, setError] = useState('');
   const [isDragOver, setIsDragOver] = useState(false);
   const [cardStyle, setCardStyle] = useState<Required<CardStyle>>(DEFAULT_CARD_STYLE);
   const [showStyle, setShowStyle] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Load instruction history from localStorage on mount
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem('deckbuilder_instruction_history');
+      if (saved) setInstructionHistory(JSON.parse(saved) as string[]);
+    } catch { /* ignore */ }
+  }, []);
+
+  const saveInstructionToHistory = (text: string) => {
+    const trimmed = text.trim();
+    if (!trimmed) return;
+    setInstructionHistory((prev) => {
+      const deduped = [trimmed, ...prev.filter((h) => h !== trimmed)].slice(0, 15);
+      try { localStorage.setItem('deckbuilder_instruction_history', JSON.stringify(deduped)); } catch { /* ignore */ }
+      return deduped;
+    });
+  };
+
+  const deleteHistoryItem = (idx: number) => {
+    setInstructionHistory((prev) => {
+      const next = prev.filter((_, i) => i !== idx);
+      try { localStorage.setItem('deckbuilder_instruction_history', JSON.stringify(next)); } catch { /* ignore */ }
+      return next;
+    });
+  };
 
   const updateStyle = <K extends keyof CardStyle>(key: K, value: Required<CardStyle>[K]) => {
     setCardStyle((prev) => ({ ...prev, [key]: value }));
@@ -161,6 +192,7 @@ export default function DeckBuilder() {
     if (files.length === 0 || isAnalyzing) return;
     setIsAnalyzing(true);
     setError('');
+    if (customInstruction.trim()) saveInstructionToHistory(customInstruction);
 
     try {
       const fileList = await Promise.all(
@@ -215,6 +247,58 @@ export default function DeckBuilder() {
       ...prev,
       { id: `card-new-${Date.now()}`, front: '', back: '', tags: [], type: 'basic' },
     ]);
+  };
+
+  const handleRefineCard = async (card: DeckCard, action: string) => {
+    if (refiningCardId) return;
+    setRefiningCardId(card.id);
+    setError('');
+    try {
+      const res = await fetch('/api/refine-card', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ card, action }),
+      });
+      const data = await res.json() as { cards?: DeckCard[]; error?: string };
+      if (!res.ok || data.error) throw new Error(data.error ?? 'エラー');
+      // Replace the original card with the refined card(s)
+      setCards((prev) => {
+        const idx = prev.findIndex((c) => c.id === card.id);
+        if (idx === -1) return prev;
+        return [...prev.slice(0, idx), ...(data.cards ?? []), ...prev.slice(idx + 1)];
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'カードの改善に失敗しました。');
+    } finally {
+      setRefiningCardId(null);
+    }
+  };
+
+  const handleQualityCheck = async () => {
+    if (cards.length === 0 || isQualityChecking) return;
+    setIsQualityChecking(true);
+    setQualityMessage('');
+    setError('');
+    try {
+      const res = await fetch('/api/quality-check', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cards }),
+      });
+      const data = await res.json() as { cards?: DeckCard[]; removed?: number; error?: string };
+      if (!res.ok || data.error) throw new Error(data.error ?? 'エラー');
+      setCards(data.cards ?? []);
+      const removed = data.removed ?? 0;
+      setQualityMessage(
+        removed > 0
+          ? `品質チェック完了：${removed}枚を整理しました（重複除去・内容補完）`
+          : '品質チェック完了：問題は見つかりませんでした'
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '品質チェックに失敗しました。');
+    } finally {
+      setIsQualityChecking(false);
+    }
   };
 
   const handleExport = () => {
@@ -590,9 +674,51 @@ export default function DeckBuilder() {
 
         {/* Custom Instruction */}
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">
-            AIへの追加指示 <span className="text-gray-400 font-normal">（任意）</span>
-          </label>
+          <div className="flex items-center justify-between mb-1">
+            <label className="text-sm font-medium text-gray-700">
+              AIへの追加指示 <span className="text-gray-400 font-normal">（任意）</span>
+            </label>
+            {instructionHistory.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setShowHistory((v) => !v)}
+                className="text-xs text-indigo-600 hover:text-indigo-700 flex items-center gap-1"
+              >
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                履歴 ({instructionHistory.length})
+              </button>
+            )}
+          </div>
+
+          {/* History list */}
+          {showHistory && instructionHistory.length > 0 && (
+            <ul className="mb-2 bg-white border border-indigo-100 rounded-xl divide-y divide-gray-100 shadow-sm max-h-56 overflow-y-auto">
+              {instructionHistory.map((item, idx) => (
+                <li key={idx} className="flex items-start gap-2 px-3 py-2">
+                  <button
+                    type="button"
+                    onClick={() => { setCustomInstruction(item); setShowHistory(false); }}
+                    className="flex-1 text-left text-xs text-gray-700 hover:text-indigo-700 leading-relaxed whitespace-pre-wrap line-clamp-3"
+                  >
+                    {item}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => deleteHistoryItem(idx)}
+                    className="text-gray-300 hover:text-red-400 flex-shrink-0 mt-0.5"
+                    title="削除"
+                  >
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+
           <textarea
             value={customInstruction}
             onChange={(e) => setCustomInstruction(e.target.value)}
@@ -601,7 +727,7 @@ export default function DeckBuilder() {
             className="w-full rounded-xl border border-gray-300 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent resize-none"
           />
           <p className="text-xs text-gray-400 mt-1">
-            HTMLタグ（&lt;span style=&quot;color:red&quot;&gt;...&lt;/span&gt;など）も使えます
+            HTMLタグ（&lt;span style=&quot;color:red&quot;&gt;...&lt;/span&gt;など）も使えます · カード生成時に自動保存
           </p>
         </div>
 
@@ -638,20 +764,46 @@ export default function DeckBuilder() {
         {/* Generated Cards */}
         {cards.length > 0 && (
           <div>
-            <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center justify-between mb-2">
               <h2 className="font-semibold text-gray-800 text-sm">
-                {cards.length}枚のカードが生成されました
+                {cards.length}枚のカード
               </h2>
-              <button
-                onClick={addCard}
-                className="text-xs text-indigo-600 hover:text-indigo-700 font-medium flex items-center gap-1"
-              >
-                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                </svg>
-                カードを追加
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={handleQualityCheck}
+                  disabled={isQualityChecking}
+                  className="text-xs text-violet-600 hover:text-violet-700 font-medium flex items-center gap-1 disabled:opacity-50"
+                  title="重複除去・内容補完・品質チェック"
+                >
+                  {isQualityChecking ? (
+                    <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+                    </svg>
+                  ) : (
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+                    </svg>
+                  )}
+                  品質チェック
+                </button>
+                <button
+                  onClick={addCard}
+                  className="text-xs text-indigo-600 hover:text-indigo-700 font-medium flex items-center gap-1"
+                >
+                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                  </svg>
+                  追加
+                </button>
+              </div>
             </div>
+
+            {qualityMessage && (
+              <p className="text-xs text-violet-700 bg-violet-50 border border-violet-200 rounded-lg px-3 py-2 mb-3">
+                {qualityMessage}
+              </p>
+            )}
 
             <div className="space-y-3">
               {cards.map((card, idx) => (
@@ -704,6 +856,37 @@ export default function DeckBuilder() {
                         className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-1 focus:ring-indigo-400 resize-none"
                       />
                     </div>
+                  </div>
+
+                  {/* Per-card AI refine actions */}
+                  <div className="mt-2 pt-2 border-t border-gray-100 flex flex-wrap gap-1.5">
+                    {refiningCardId === card.id ? (
+                      <span className="text-xs text-indigo-500 flex items-center gap-1">
+                        <svg className="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+                        </svg>
+                        AI改善中...
+                      </span>
+                    ) : (
+                      <>
+                        {[
+                          { action: 'simplify', label: 'シンプルに' },
+                          { action: 'elaborate', label: '詳しく' },
+                          { action: 'example', label: '例文を追加' },
+                          { action: 'split', label: '分割' },
+                        ].map(({ action, label }) => (
+                          <button
+                            key={action}
+                            onClick={() => handleRefineCard(card, action)}
+                            disabled={!!refiningCardId}
+                            className="text-xs px-2 py-0.5 rounded-full border border-indigo-200 text-indigo-600 hover:bg-indigo-50 disabled:opacity-40 transition-colors"
+                          >
+                            ✨ {label}
+                          </button>
+                        ))}
+                      </>
+                    )}
                   </div>
                 </div>
               ))}

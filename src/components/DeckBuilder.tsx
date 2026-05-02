@@ -12,8 +12,60 @@ const FORMAT_OPTIONS: { value: DeckFormat; label: string; desc: string }[] = [
   { value: 'detailed', label: '解説付き', desc: '裏面に答えと詳しい解説を含む' },
 ];
 
-const MAX_FILE_SIZE = 3 * 1024 * 1024; // 3MB per file
-const MAX_TOTAL_SIZE = 4 * 1024 * 1024; // 4MB total (Vercel hobby request body limit ~4.5MB)
+const MAX_INPUT_FILE_SIZE = 15 * 1024 * 1024; // 15MB per file BEFORE compression
+const MAX_TOTAL_SIZE = 3 * 1024 * 1024; // 3MB combined AFTER compression (Vercel hobby request body ~4.5MB; base64 inflates ~33%)
+const IMAGE_MAX_DIMENSION = 1600; // px
+const IMAGE_JPEG_QUALITY = 0.82;
+
+/**
+ * Compress a user-supplied image by downscaling and re-encoding as JPEG.
+ * Returns the original file unchanged if it's not an image or compression
+ * doesn't reduce the size.
+ */
+async function compressImage(file: File): Promise<File> {
+  if (!file.type.startsWith('image/')) return file;
+
+  const dataUrl: string = await new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+
+  const img: HTMLImageElement = await new Promise((resolve, reject) => {
+    const el = new Image();
+    el.onload = () => resolve(el);
+    el.onerror = reject;
+    el.src = dataUrl;
+  });
+
+  let { width, height } = img;
+  const longest = Math.max(width, height);
+  if (longest > IMAGE_MAX_DIMENSION) {
+    const scale = IMAGE_MAX_DIMENSION / longest;
+    width = Math.round(width * scale);
+    height = Math.round(height * scale);
+  }
+
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return file;
+  ctx.drawImage(img, 0, 0, width, height);
+
+  const blob: Blob = await new Promise((resolve, reject) => {
+    canvas.toBlob(
+      (b) => (b ? resolve(b) : reject(new Error('toBlob failed'))),
+      'image/jpeg',
+      IMAGE_JPEG_QUALITY
+    );
+  });
+
+  if (blob.size >= file.size) return file;
+  const newName = file.name.replace(/\.[^.]+$/, '') + '.jpg';
+  return new File([blob], newName, { type: 'image/jpeg' });
+}
 
 const DEFAULT_CARD_STYLE: Required<CardStyle> = {
   frontColor: '#1a1a2e',
@@ -44,41 +96,53 @@ export default function DeckBuilder() {
   };
 
   const VALID_TYPES = ['application/pdf', 'image/jpeg', 'image/png', 'image/webp'];
+  const [isCompressing, setIsCompressing] = useState(false);
 
-  const addFiles = (newFiles: File[]) => {
+  const addFiles = async (newFiles: File[]) => {
+    // Pre-filter format / size before compression
     const accepted: File[] = [];
     const rejected: string[] = [];
-
     for (const f of newFiles) {
       if (!VALID_TYPES.includes(f.type)) {
         rejected.push(`${f.name}（非対応形式）`);
         continue;
       }
-      if (f.size > MAX_FILE_SIZE) {
-        rejected.push(`${f.name}（${(f.size / 1024 / 1024).toFixed(1)}MB > 3MB）`);
+      if (f.size > MAX_INPUT_FILE_SIZE) {
+        rejected.push(`${f.name}（${(f.size / 1024 / 1024).toFixed(0)}MB超）`);
         continue;
       }
       accepted.push(f);
     }
+    if (rejected.length > 0) {
+      setError(`追加できなかったファイル: ${rejected.join(', ')}`);
+    }
+    if (accepted.length === 0) return;
+
+    // Compress images in parallel
+    setIsCompressing(true);
+    let compressed: File[];
+    try {
+      compressed = await Promise.all(accepted.map(compressImage));
+    } finally {
+      setIsCompressing(false);
+    }
 
     setFiles((prev) => {
-      const combined = [...prev, ...accepted];
+      const combined = [...prev, ...compressed];
       const total = combined.reduce((sum, f) => sum + f.size, 0);
       if (total > MAX_TOTAL_SIZE) {
-        setError(`合計サイズが大きすぎます（最大4MB）。現在: ${(total / 1024 / 1024).toFixed(1)}MB`);
+        setError(
+          `合計サイズが大きすぎます（上限 ${(MAX_TOTAL_SIZE / 1024 / 1024).toFixed(0)}MB）。` +
+          `ファイルを減らすか、PDFのサイズを小さくしてください。`
+        );
         return prev;
       }
+      if (rejected.length === 0) setError('');
       return combined;
     });
 
-    if (rejected.length > 0) {
-      setError(`一部のファイルを追加できませんでした: ${rejected.join(', ')}`);
-    } else if (accepted.length > 0) {
-      setError('');
-    }
-
-    if (accepted.length > 0 && !deckName) {
-      setDeckName(accepted[0].name.replace(/\.[^.]+$/, ''));
+    if (!deckName && compressed.length > 0) {
+      setDeckName(compressed[0].name.replace(/\.[^.]+$/, ''));
     }
   };
 
@@ -90,7 +154,7 @@ export default function DeckBuilder() {
     e.preventDefault();
     setIsDragOver(false);
     const dropped = Array.from(e.dataTransfer.files);
-    if (dropped.length > 0) addFiles(dropped);
+    if (dropped.length > 0) void addFiles(dropped);
   };
 
   const handleAnalyze = async () => {
@@ -227,19 +291,30 @@ export default function DeckBuilder() {
             className="hidden"
             onChange={(e) => {
               const selected = Array.from(e.target.files ?? []);
-              if (selected.length > 0) addFiles(selected);
+              if (selected.length > 0) void addFiles(selected);
               if (fileInputRef.current) fileInputRef.current.value = '';
             }}
           />
-          {files.length > 0 ? (
+          {isCompressing ? (
+            <div>
+              <svg className="w-7 h-7 text-indigo-400 mx-auto mb-2 animate-spin" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+              </svg>
+              <p className="text-sm text-indigo-600">画像を圧縮中...</p>
+            </div>
+          ) : files.length > 0 ? (
             <div>
               <svg className="w-7 h-7 text-green-500 mx-auto mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
               </svg>
               <p className="text-sm font-medium text-green-700">
                 {files.length}個のファイルを選択中
+                <span className="text-gray-400 font-normal ml-1">
+                  ({(files.reduce((s, f) => s + f.size, 0) / 1024).toFixed(0)}KB / {(MAX_TOTAL_SIZE / 1024).toFixed(0)}KB)
+                </span>
               </p>
-              <p className="text-xs text-gray-400 mt-1">タップして追加</p>
+              <p className="text-xs text-gray-400 mt-1">タップしてさらに追加</p>
             </div>
           ) : (
             <div>
@@ -247,7 +322,7 @@ export default function DeckBuilder() {
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
               </svg>
               <p className="text-sm font-medium text-gray-600">PDFまたは画像をアップロード</p>
-              <p className="text-xs text-gray-400 mt-1">複数選択可 · PDF / JPG / PNG / WebP · 各3MB / 合計4MB</p>
+              <p className="text-xs text-gray-400 mt-1">複数選択可 · PDF / JPG / PNG / WebP · 画像は自動圧縮</p>
             </div>
           )}
         </div>
@@ -539,7 +614,7 @@ export default function DeckBuilder() {
         {/* Generate Button */}
         <button
           onClick={handleAnalyze}
-          disabled={files.length === 0 || isAnalyzing}
+          disabled={files.length === 0 || isAnalyzing || isCompressing}
           className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-300 text-white font-semibold rounded-xl transition-colors flex items-center justify-center gap-2 text-sm"
         >
           {isAnalyzing ? (

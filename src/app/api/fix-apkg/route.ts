@@ -37,8 +37,8 @@ export async function POST(req: NextRequest) {
       for (const row of result[0].values) {
         const id = row[0] as number;
         const flds = String(row[1] ?? '');
-        // Replace {{c2::, {{c3::, ... {{c99::, etc. with {{c1::
-        const newFlds = flds.replace(/\{\{c([2-9][0-9]*)::/g, '{{c1::');
+        // Replace {{c2::...{{c9:: (single digit) and {{c10:: and above with {{c1::
+        const newFlds = flds.replace(/\{\{c([2-9]|\d{2,})::/g, '{{c1::');
         if (newFlds !== flds) {
           db.run('UPDATE notes SET flds = ? WHERE id = ?', [newFlds, id]);
           // Remove extra card rows (ord > 0) for this note — they're now unreachable

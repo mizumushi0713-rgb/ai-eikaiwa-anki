@@ -50,7 +50,7 @@ function parseCards(rawText: string): DeckCard[] {
   const parsed = JSON.parse(cleaned);
   return (parsed.cards || []).map((c: Omit<DeckCard, 'id'>, i: number) => {
     // Normalize: replace all {{cN::}} (N>=2) with {{c1::}} so all blanks reveal together
-    const front = String(c.front || '').replace(/\{\{c[2-9]\d*::/g, '{{c1::');
+    const front = String(c.front || '').replace(/\{\{c([2-9]|\d{2,})::/g, '{{c1::');
     return {
       id: `card-${i}-${Date.now()}`,
       front,

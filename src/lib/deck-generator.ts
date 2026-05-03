@@ -211,10 +211,27 @@ export async function generateApkgFromDeckCards(
       noteId, guid, modelId, now, -1, tagsStr, flds, sfld, csum, 0, '',
     ]);
 
-    const cardId = noteId + 1000000;
-    db.run(`INSERT INTO cards VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, [
-      cardId, noteId, DECK_ID, 0, now, -1, 0, 0, cardDue, 0, 0, 0, 0, 0, 0, 0, 0, '',
-    ]);
+    if (card.type === 'cloze') {
+      // Find all unique cN indices (c1→ord 0, c2→ord 1, ...) and insert one card row each
+      const ords = new Set<number>();
+      const clozePattern = /\{\{c(\d+)::/g;
+      let m: RegExpExecArray | null;
+      while ((m = clozePattern.exec(card.front)) !== null) {
+        ords.add(parseInt(m[1], 10) - 1); // Anki ord is 0-indexed
+      }
+      if (ords.size === 0) ords.add(0); // fallback
+      let i = 0;
+      for (const ord of Array.from(ords).sort((a, b) => a - b)) {
+        db.run(`INSERT INTO cards VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, [
+          noteId + 1000000 + i, noteId, DECK_ID, ord, now, -1, 0, 0, cardDue, 0, 0, 0, 0, 0, 0, 0, 0, '',
+        ]);
+        i++;
+      }
+    } else {
+      db.run(`INSERT INTO cards VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, [
+        noteId + 1000000, noteId, DECK_ID, 0, now, -1, 0, 0, cardDue, 0, 0, 0, 0, 0, 0, 0, 0, '',
+      ]);
+    }
 
     cardDue++;
     await new Promise((r) => setTimeout(r, 1));

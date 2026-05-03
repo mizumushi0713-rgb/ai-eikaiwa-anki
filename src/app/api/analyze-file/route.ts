@@ -14,7 +14,7 @@ function buildPrompt(format: DeckFormat, customInstruction?: string): string {
   const formatInstructions: Record<DeckFormat, string> = {
     auto: '教材の性質に最も適した形式を自動判断してください。一問一答、穴埋め、対話形式などを混在させても構いません。',
     basic: '表面（front）に用語・問い、裏面（back）に答え・定義を配置してください。type は "basic" のみ使用。',
-    cloze: '重要な用語や概念を {{c1::用語}} の形式で穴埋めにしてください。type は "cloze" のみ使用。back には補足解説を入れてください。',
+    cloze: '重要な用語や概念を {{c1::用語}} の形式で穴埋めにしてください。複数の穴埋めがある場合もすべて {{c1::}} のみ使用し、{{c2::}} 以降は絶対に使わないでください（一度の回答表示で全答えが見えるようにするため）。type は "cloze" のみ使用。back には補足解説を入れてください。',
     dialogue: '会話文や問答がある場合は片方の発話を front に、応答を back に配置してください。type は "basic" を使用。',
     detailed: '裏面（back）には答えだけでなく、教材内の関連解説・文脈も詳しく含めてください。type は "basic" を使用。',
   };
@@ -35,7 +35,7 @@ ${formatInstructions[format]}${customSection}
 
 ルール：
 - type は "basic" または "cloze" のみ
-- cloze の場合、front に {{c1::重要語}} の形式を必ず使用
+- cloze の場合、front に {{c1::重要語}} の形式を必ず使用（{{c2::}} 以降は使用禁止）
 - tags は教材のカテゴリや単元名（1〜2個）
 - 日本語教材なら日本語で、英語教材なら英語メインでカードを作成
 - 目標：10〜20枚の高品質カード
@@ -48,13 +48,17 @@ function parseCards(rawText: string): DeckCard[] {
     .replace(/\s*```$/i, '')
     .trim();
   const parsed = JSON.parse(cleaned);
-  return (parsed.cards || []).map((c: Omit<DeckCard, 'id'>, i: number) => ({
-    id: `card-${i}-${Date.now()}`,
-    front: String(c.front || ''),
-    back: String(c.back || ''),
-    tags: Array.isArray(c.tags) ? c.tags.map(String) : [],
-    type: c.type === 'cloze' ? 'cloze' : 'basic',
-  }));
+  return (parsed.cards || []).map((c: Omit<DeckCard, 'id'>, i: number) => {
+    // Normalize: replace all {{cN::}} (N>=2) with {{c1::}} so all blanks reveal together
+    const front = String(c.front || '').replace(/\{\{c[2-9]\d*::/g, '{{c1::');
+    return {
+      id: `card-${i}-${Date.now()}`,
+      front,
+      back: String(c.back || ''),
+      tags: Array.isArray(c.tags) ? c.tags.map(String) : [],
+      type: c.type === 'cloze' ? 'cloze' : 'basic',
+    };
+  });
 }
 
 export async function POST(req: NextRequest) {

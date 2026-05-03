@@ -92,6 +92,11 @@ export default function DeckBuilder() {
   const [qualityMessage, setQualityMessage] = useState('');
   const [error, setError] = useState('');
   const [isDragOver, setIsDragOver] = useState(false);
+  const [fixApkgFile, setFixApkgFile] = useState<File | null>(null);
+  const [isFixing, setIsFixing] = useState(false);
+  const [fixMessage, setFixMessage] = useState('');
+  const [fixError, setFixError] = useState('');
+  const fixInputRef = useRef<HTMLInputElement>(null);
   const [cardStyle, setCardStyle] = useState<Required<CardStyle>>(DEFAULT_CARD_STYLE);
   const [showStyle, setShowStyle] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -271,6 +276,39 @@ export default function DeckBuilder() {
       setError(err instanceof Error ? err.message : 'カードの改善に失敗しました。');
     } finally {
       setRefiningCardId(null);
+    }
+  };
+
+  const handleFixApkg = async () => {
+    if (!fixApkgFile || isFixing) return;
+    setIsFixing(true);
+    setFixMessage('');
+    setFixError('');
+    try {
+      const formData = new FormData();
+      formData.append('file', fixApkgFile);
+      const res = await fetch('/api/fix-apkg', { method: 'POST', body: formData });
+      if (res.headers.get('Content-Type')?.includes('application/json')) {
+        const data = await res.json() as { error?: string };
+        if (data.error) { setFixError(data.error); return; }
+      }
+      if (!res.ok) { setFixError('修正に失敗しました。'); return; }
+      const fixedCount = res.headers.get('X-Fixed-Count') ?? '?';
+      const blob = await res.blob();
+      const disposition = res.headers.get('Content-Disposition') ?? '';
+      const nameMatch = disposition.match(/filename\*=UTF-8''(.+)/);
+      const filename = nameMatch ? decodeURIComponent(nameMatch[1]) : fixApkgFile.name.replace('.apkg', '_fixed.apkg');
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = filename; a.click();
+      URL.revokeObjectURL(url);
+      setFixMessage(`${fixedCount}枚のカードを修正しました。ダウンロードを確認してください。`);
+      setFixApkgFile(null);
+      if (fixInputRef.current) fixInputRef.current.value = '';
+    } catch {
+      setFixError('エラーが発生しました。');
+    } finally {
+      setIsFixing(false);
     }
   };
 
@@ -917,6 +955,77 @@ export default function DeckBuilder() {
             </button>
           </div>
         )}
+      </div>
+
+      {/* Fix existing .apkg section */}
+      <div className="max-w-lg mx-auto px-4 pb-10">
+        <details className="bg-white rounded-2xl border border-gray-200 shadow-sm">
+          <summary className="px-5 py-4 cursor-pointer text-sm font-medium text-gray-700 flex items-center gap-2 select-none list-none">
+            <svg className="w-4 h-4 text-orange-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+            </svg>
+            既存デッキのcloze修正（c2以降→c1に変換）
+          </summary>
+          <div className="px-5 pb-5 pt-2 space-y-3">
+            <p className="text-xs text-gray-500">
+              過去に作成した .apkg ファイルに含まれる <code className="bg-gray-100 px-1 rounded">{'{{c2::}}'}</code> 以降の穴埋めを
+              すべて <code className="bg-gray-100 px-1 rounded">{'{{c1::}}'}</code> に変換して再ダウンロードできます。
+            </p>
+
+            <label className="block">
+              <span className="text-xs font-medium text-gray-600 mb-1 block">.apkg ファイルを選択</span>
+              <input
+                ref={fixInputRef}
+                type="file"
+                accept=".apkg"
+                onChange={(e) => {
+                  setFixApkgFile(e.target.files?.[0] ?? null);
+                  setFixMessage('');
+                  setFixError('');
+                }}
+                className="w-full text-sm text-gray-600 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-medium file:bg-orange-50 file:text-orange-700 hover:file:bg-orange-100"
+              />
+            </label>
+
+            {fixApkgFile && (
+              <p className="text-xs text-gray-500">選択中: {fixApkgFile.name}</p>
+            )}
+
+            {fixError && (
+              <p className="text-xs text-orange-700 bg-orange-50 border border-orange-200 rounded-lg px-3 py-2">
+                {fixError}
+              </p>
+            )}
+            {fixMessage && (
+              <p className="text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2">
+                ✓ {fixMessage}
+              </p>
+            )}
+
+            <button
+              onClick={handleFixApkg}
+              disabled={!fixApkgFile || isFixing}
+              className="w-full py-2.5 bg-orange-500 hover:bg-orange-600 disabled:bg-gray-300 text-white font-semibold rounded-xl transition-colors flex items-center justify-center gap-2 text-sm"
+            >
+              {isFixing ? (
+                <>
+                  <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+                  </svg>
+                  処理中...
+                </>
+              ) : (
+                <>
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                  </svg>
+                  修正してダウンロード
+                </>
+              )}
+            </button>
+          </div>
+        </details>
       </div>
     </div>
   );

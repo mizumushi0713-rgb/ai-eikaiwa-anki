@@ -2,7 +2,17 @@
   "permissions": {
     "allow": [
       "WebSearch",
-      "WebFetch(domain:ai.google.dev)"
+      "WebFetch(domain:ai.google.dev)",
+      "mcp__Claude_Preview__preview_start",
+      "Bash(npx next:*)",
+      "Bash(npx tsc:*)",
+      "Bash(npm run:*)",
+      "Bash(npx eslint:*)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:3000/deck)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" -X POST http://localhost:3000/api/refine-card -H \"Content-Type: application/json\" -d '{\"\"card\"\":{\"\"id\"\":\"\"test\"\",\"\"front\"\":\"\"test\"\",\"\"back\"\":\"\"test\"\",\"\"tags\"\":[],\"\"type\"\":\"\"basic\"\"},\"\"action\"\":\"\"simplify\"\"}')",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" -X POST http://localhost:3000/api/quality-check -H \"Content-Type: application/json\" -d '{\"\"cards\"\":[{\"\"id\"\":\"\"1\"\",\"\"front\"\":\"\"test\"\",\"\"back\"\":\"\"test\"\",\"\"tags\"\":[],\"\"type\"\":\"\"basic\"\"}]}')",
+      "Bash(node -e \":*)",
+      "Bash(npm install:*)"
     ]
   }
 }

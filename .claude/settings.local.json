@@ -12,7 +12,8 @@
       "Bash(curl -s -o /dev/null -w \"%{http_code}\" -X POST http://localhost:3000/api/refine-card -H \"Content-Type: application/json\" -d '{\"\"card\"\":{\"\"id\"\":\"\"test\"\",\"\"front\"\":\"\"test\"\",\"\"back\"\":\"\"test\"\",\"\"tags\"\":[],\"\"type\"\":\"\"basic\"\"},\"\"action\"\":\"\"simplify\"\"}')",
       "Bash(curl -s -o /dev/null -w \"%{http_code}\" -X POST http://localhost:3000/api/quality-check -H \"Content-Type: application/json\" -d '{\"\"cards\"\":[{\"\"id\"\":\"\"1\"\",\"\"front\"\":\"\"test\"\",\"\"back\"\":\"\"test\"\",\"\"tags\"\":[],\"\"type\"\":\"\"basic\"\"}]}')",
       "Bash(node -e \":*)",
-      "Bash(npm install:*)"
+      "Bash(npm install:*)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" -X POST http://localhost:3000/api/fix-apkg -F \"wrong=test\")"
     ]
   }
 }

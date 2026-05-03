@@ -89,6 +89,21 @@ export async function POST(req: NextRequest) {
       zip.remove('collection.anki21b');
       zip.remove('meta');
       zip.file('collection.anki2', exported);
+
+      // The new format's "media" file is protobuf-encoded; legacy format
+      // expects valid JSON. Verify and replace if necessary.
+      const mediaEntry = zip.file('media');
+      if (mediaEntry) {
+        const mediaText = await mediaEntry.async('string');
+        try {
+          JSON.parse(mediaText);
+        } catch {
+          // Not valid JSON — replace with empty media mapping
+          zip.file('media', '{}');
+        }
+      } else {
+        zip.file('media', '{}');
+      }
     } else {
       zip.file(dbFileName, exported);
     }

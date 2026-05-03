@@ -29,14 +29,16 @@ export async function POST(req: NextRequest) {
     const SQL = await initSqlJs({ wasmBinary: wasmBinary.buffer as ArrayBuffer });
     const db = new SQL.Database(new Uint8Array(dbBuffer));
 
-    // Find all notes containing {{c2:: or higher
-    const result = db.exec("SELECT id, flds FROM notes WHERE flds LIKE '%{{c%'");
+    // Fetch all notes and fix in JavaScript (avoids potential LIKE quoting issues with {{)
+    const result = db.exec('SELECT id, flds FROM notes');
     let fixedCount = 0;
 
     if (result.length > 0) {
       for (const row of result[0].values) {
-        const [id, flds] = row as [number, string];
-        const newFlds = flds.replace(/\{\{c([2-9]\d*)::/g, '{{c1::');
+        const id = row[0] as number;
+        const flds = String(row[1] ?? '');
+        // Replace {{c2::, {{c3::, ... {{c99::, etc. with {{c1::
+        const newFlds = flds.replace(/\{\{c([2-9][0-9]*)::/g, '{{c1::');
         if (newFlds !== flds) {
           db.run('UPDATE notes SET flds = ? WHERE id = ?', [newFlds, id]);
           // Remove extra card rows (ord > 0) for this note — they're now unreachable

@@ -32,11 +32,19 @@ export async function POST(req: NextRequest) {
     // Fetch all notes and fix in JavaScript (avoids potential LIKE quoting issues with {{)
     const result = db.exec('SELECT id, flds FROM notes');
     let fixedCount = 0;
+    let noteCount = 0;
+    let clozeCount = 0;
+    let sampleFlds = '';
 
     if (result.length > 0) {
+      noteCount = result[0].values.length;
       for (const row of result[0].values) {
         const id = row[0] as number;
         const flds = String(row[1] ?? '');
+        if (flds.includes('{{c')) {
+          clozeCount++;
+          if (!sampleFlds) sampleFlds = flds.slice(0, 150);
+        }
         // Replace {{c2::...{{c9:: (single digit) and {{c10:: and above with {{c1::
         const newFlds = flds.replace(/\{\{c([2-9]|\d{2,})::/g, '{{c1::');
         if (newFlds !== flds) {
@@ -50,7 +58,10 @@ export async function POST(req: NextRequest) {
 
     if (fixedCount === 0) {
       db.close();
-      return Response.json({ error: '修正が必要なカードは見つかりませんでした（すでにc1のみのデッキです）' }, { status: 200 });
+      return Response.json({
+        error: '修正が必要なカードは見つかりませんでした（すでにc1のみのデッキです）',
+        debug: { noteCount, clozeCount, sampleFlds },
+      }, { status: 200 });
     }
 
     const exported = new Uint8Array(db.export());

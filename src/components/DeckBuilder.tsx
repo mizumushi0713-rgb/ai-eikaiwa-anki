@@ -289,8 +289,13 @@ export default function DeckBuilder() {
       formData.append('file', fixApkgFile);
       const res = await fetch('/api/fix-apkg', { method: 'POST', body: formData });
       if (res.headers.get('Content-Type')?.includes('application/json')) {
-        const data = await res.json() as { error?: string };
-        if (data.error) { setFixError(data.error); return; }
+        const data = await res.json() as { error?: string; debug?: { noteCount: number; clozeCount: number; sampleFlds: string } };
+        if (data.error) {
+          const dbg = data.debug;
+          const debugMsg = dbg ? ` [診断: ノート数=${dbg.noteCount}, cloze含む=${dbg.clozeCount}, サンプル="${dbg.sampleFlds}"]` : '';
+          setFixError(data.error + debugMsg);
+          return;
+        }
       }
       if (!res.ok) { setFixError('修正に失敗しました。'); return; }
       const fixedCount = res.headers.get('X-Fixed-Count') ?? '?';

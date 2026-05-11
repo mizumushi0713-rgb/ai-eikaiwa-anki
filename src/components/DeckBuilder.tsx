@@ -87,6 +87,7 @@ export default function DeckBuilder() {
   const [cards, setCards] = useState<DeckCard[]>([]);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
+  const [withAudio, setWithAudio] = useState(false);
   const [refiningCardId, setRefiningCardId] = useState<string | null>(null);
   const [isQualityChecking, setIsQualityChecking] = useState(false);
   const [qualityMessage, setQualityMessage] = useState('');
@@ -348,6 +349,36 @@ export default function DeckBuilder() {
     if (cards.length === 0 || isExporting) return;
     setIsExporting(true);
     setError('');
+
+    if (withAudio) {
+      // Use fetch for audio export so we can show a loading spinner
+      // (audio generation takes 10-30s depending on card count)
+      const payload = { cards, deckName: deckName || '学習デッキ', cardStyle, withAudio: true };
+      fetch('/api/generate-deck-apkg', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+        .then(async (res) => {
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          const blob = await res.blob();
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          const date = new Date().toISOString().slice(0, 10);
+          a.href = url;
+          a.download = `${deckName || '学習デッキ'}_${date}.apkg`;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          URL.revokeObjectURL(url);
+        })
+        .catch((err) => {
+          console.error(err);
+          setError('.apkgの生成に失敗しました。もう一度お試しください。');
+        })
+        .finally(() => setIsExporting(false));
+      return;
+    }
 
     // Native form POST submission triggers a real browser download with the
     // server-supplied filename (Content-Disposition). This is the only reliable
@@ -935,11 +966,26 @@ export default function DeckBuilder() {
               ))}
             </div>
 
-            {/* Export Button */}
+            {/* Audio option + Export Button */}
+            <label className="mt-4 flex items-start gap-3 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={withAudio}
+                onChange={(e) => setWithAudio(e.target.checked)}
+                className="mt-0.5 w-4 h-4 rounded accent-emerald-600 flex-shrink-0"
+              />
+              <div>
+                <span className="text-sm font-medium text-gray-700">AI音声を付ける（英文のみ）</span>
+                <p className="text-xs text-gray-400 mt-0.5">
+                  英語カードにGemini音声を埋め込みます。カード数により生成に時間がかかります（目安：10枚で約20秒）
+                </p>
+              </div>
+            </label>
+
             <button
               onClick={handleExport}
               disabled={isExporting || cards.length === 0}
-              className="w-full mt-4 py-3 bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-300 text-white font-semibold rounded-xl transition-colors flex items-center justify-center gap-2 text-sm"
+              className="w-full mt-3 py-3 bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-300 text-white font-semibold rounded-xl transition-colors flex items-center justify-center gap-2 text-sm"
             >
               {isExporting ? (
                 <>
@@ -947,14 +993,14 @@ export default function DeckBuilder() {
                     <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                     <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
                   </svg>
-                  生成中...
+                  {withAudio ? 'AI音声を生成中...' : '生成中...'}
                 </>
               ) : (
                 <>
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                   </svg>
-                  Ankiデッキをエクスポート (.apkg)
+                  {withAudio ? 'AI音声付きでエクスポート (.apkg)' : 'Ankiデッキをエクスポート (.apkg)'}
                 </>
               )}
             </button>

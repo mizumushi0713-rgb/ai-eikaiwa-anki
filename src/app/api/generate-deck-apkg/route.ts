@@ -1,6 +1,9 @@
 import { NextRequest } from 'next/server';
 import { generateApkgFromDeckCards } from '@/lib/deck-generator';
+import { generateAudioFiles } from '@/lib/tts-utils';
 import type { DeckCard, CardStyle } from '@/lib/types';
+
+type Payload = { cards: DeckCard[]; deckName?: string; cardStyle?: CardStyle; withAudio?: boolean };
 
 export async function POST(req: NextRequest) {
   try {
@@ -10,6 +13,7 @@ export async function POST(req: NextRequest) {
     let cards: DeckCard[] = [];
     let deckName = '学習デッキ';
     let cardStyle: CardStyle | undefined;
+    let withAudio = false;
 
     if (contentType.includes('application/x-www-form-urlencoded') || contentType.includes('multipart/form-data')) {
       const form = await req.formData();
@@ -17,22 +21,33 @@ export async function POST(req: NextRequest) {
       if (typeof raw !== 'string') {
         return new Response('Missing payload', { status: 400 });
       }
-      const parsed = JSON.parse(raw) as { cards: DeckCard[]; deckName?: string; cardStyle?: CardStyle };
+      const parsed = JSON.parse(raw) as Payload;
       cards = parsed.cards;
       if (parsed.deckName) deckName = parsed.deckName;
       cardStyle = parsed.cardStyle;
+      withAudio = parsed.withAudio ?? false;
     } else {
-      const body = await req.json() as { cards: DeckCard[]; deckName?: string; cardStyle?: CardStyle };
+      const body = await req.json() as Payload;
       cards = body.cards;
       if (body.deckName) deckName = body.deckName;
       cardStyle = body.cardStyle;
+      withAudio = body.withAudio ?? false;
     }
 
     if (!cards || cards.length === 0) {
       return new Response('No cards provided', { status: 400 });
     }
 
-    const apkgBuffer = await generateApkgFromDeckCards(cards, deckName, cardStyle);
+    // Generate Gemini TTS audio for English cards if requested
+    let audioFiles: (Buffer | null)[] | undefined;
+    if (withAudio && process.env.GOOGLE_API_KEY) {
+      audioFiles = await generateAudioFiles(
+        cards.map((c) => c.front),
+        process.env.GOOGLE_API_KEY
+      );
+    }
+
+    const apkgBuffer = await generateApkgFromDeckCards(cards, deckName, cardStyle, audioFiles);
     const date = new Date().toISOString().slice(0, 10);
     const filename = `${deckName}_${date}.apkg`;
 

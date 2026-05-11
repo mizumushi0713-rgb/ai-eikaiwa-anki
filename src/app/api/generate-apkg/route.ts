@@ -1,11 +1,12 @@
 import { NextRequest } from 'next/server';
 import { generateApkg } from '@/lib/anki-generator';
+import { generateAudioFiles } from '@/lib/tts-utils';
 import type { GenerateApkgRequest } from '@/lib/types';
 
 export async function POST(req: NextRequest) {
   try {
-    const body: GenerateApkgRequest = await req.json();
-    const { cards, pattern } = body;
+    const body = await req.json() as GenerateApkgRequest & { deckName?: string; withAudio?: boolean };
+    const { cards, pattern, deckName, withAudio } = body;
 
     if (!cards || cards.length === 0) {
       return new Response('No cards provided', { status: 400 });
@@ -14,10 +15,21 @@ export async function POST(req: NextRequest) {
       return new Response('Invalid pattern', { status: 400 });
     }
 
-    const apkgBuffer = await generateApkg(cards, pattern);
+    // Generate audio for English texts if requested
+    let audioFiles: (Buffer | null)[] | undefined;
+    if (withAudio && process.env.GOOGLE_API_KEY) {
+      // card.front is always the English phrase regardless of pattern
+      audioFiles = await generateAudioFiles(
+        cards.map((c) => c.front),
+        process.env.GOOGLE_API_KEY
+      );
+    }
 
+    const apkgBuffer = await generateApkg(cards, pattern, deckName, audioFiles);
+
+    const resolvedName = deckName?.trim() || 'AI英会話';
     const date = new Date().toISOString().slice(0, 10);
-    const filename = `AI英会話_${date}.apkg`;
+    const filename = `${resolvedName}_${date}.apkg`;
 
     return new Response(new Uint8Array(apkgBuffer), {
       headers: {

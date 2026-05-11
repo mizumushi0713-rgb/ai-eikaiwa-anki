@@ -19,7 +19,7 @@ import type { AnkiCard, ExportPattern } from './types';
 const DECK_ID = 1700000000001;
 const MODEL_ID_EN_TO_JA = 1700000000002;
 const MODEL_ID_JA_TO_EN = 1700000000003;
-const DECK_NAME = 'AI英会話';
+const DEFAULT_DECK_NAME = 'AI英会話';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -143,12 +143,12 @@ function buildModel(pattern: ExportPattern) {
 
 // ─── Deck definition ─────────────────────────────────────────────────────────
 
-function buildDeck() {
+function buildDeck(deckName: string) {
   const now = nowSec();
   return {
     [String(DECK_ID)]: {
       id: DECK_ID,
-      name: DECK_NAME,
+      name: deckName,
       desc: 'AI英会話アプリで自動生成されたデッキ',
       mod: now,
       usn: 0,
@@ -242,8 +242,11 @@ const GLOBAL_CONF = {
 
 export async function generateApkg(
   cards: AnkiCard[],
-  pattern: ExportPattern
+  pattern: ExportPattern,
+  deckName?: string,
+  audioFiles?: (Buffer | null)[]
 ): Promise<Buffer> {
+  const resolvedDeckName = deckName?.trim() || DEFAULT_DECK_NAME;
   // Load sql.js WASM from public directory (copied via postinstall)
   const wasmPath = path.join(process.cwd(), 'public', 'sql-wasm.wasm');
   const wasmBinary = fs.readFileSync(wasmPath);
@@ -347,7 +350,7 @@ export async function generateApkg(
       0,
       JSON.stringify(GLOBAL_CONF),
       JSON.stringify({ [String(modelId)]: modelDef }),
-      JSON.stringify(buildDeck()),
+      JSON.stringify(buildDeck(resolvedDeckName)),
       JSON.stringify(DECK_CONF),
       '{}',
     ]
@@ -355,11 +358,14 @@ export async function generateApkg(
 
   // ── Insert notes & cards ──────────────────────────────────────────────────
   let cardDue = 1;
-  for (const card of cards) {
-    const noteId = Date.now() + cardDue; // unique ms-based id
+  for (let idx = 0; idx < cards.length; idx++) {
+    const card = cards[idx];
+    const cardDueVal = cardDue;
+    const noteId = Date.now() + cardDueVal; // unique ms-based id
     const guid = generateGuid();
     // Fields separator in Anki is \x1f (Front, Meaning, Detail)
-    const flds = `${card.front}\x1f${card.meaning}\x1f${card.detail}`;
+    const audioTag = audioFiles?.[idx] ? ` [sound:anki-chat-${idx}.wav]` : '';
+    const flds = `${card.front}${audioTag}\x1f${card.meaning}\x1f${card.detail}`;
     const sfld = card.front;
     const csum = fieldChecksum(sfld);
 
@@ -387,7 +393,7 @@ export async function generateApkg(
       -1,
       0,   // type: new
       0,   // queue: new
-      cardDue,
+      cardDueVal,
       0,
       0,
       0,
@@ -411,7 +417,20 @@ export async function generateApkg(
   // ── Package into .apkg (ZIP) ──────────────────────────────────────────────
   const zip = new JSZip();
   zip.file('collection.anki2', sqliteBuffer);
-  zip.file('media', '{}');
+
+  // Embed audio files if provided
+  const mediaMap: Record<string, string> = {};
+  if (audioFiles) {
+    audioFiles.forEach((wav, idx) => {
+      if (wav) {
+        const mediaIdx = String(idx);
+        const filename = `anki-chat-${idx}.wav`;
+        zip.file(mediaIdx, wav);
+        mediaMap[mediaIdx] = filename;
+      }
+    });
+  }
+  zip.file('media', JSON.stringify(mediaMap));
 
   const apkgBuffer = await zip.generateAsync({
     type: 'nodebuffer',

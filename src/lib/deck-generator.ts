@@ -130,7 +130,8 @@ function buildClozeModel(css: string) {
 export async function generateApkgFromDeckCards(
   cards: DeckCard[],
   deckName: string,
-  style?: CardStyle
+  style?: CardStyle,
+  audioFiles?: (Buffer | null)[]
 ): Promise<Buffer> {
   const css = buildCss(style);
   const wasmPath = path.join(process.cwd(), 'public', 'sql-wasm.wasm');
@@ -197,12 +198,15 @@ export async function generateApkgFromDeckCards(
   ]);
 
   let cardDue = 1;
-  for (const card of cards) {
-    const noteId = Date.now() + cardDue;
+  for (let idx = 0; idx < cards.length; idx++) {
+    const card = cards[idx];
+    const cardDueVal = cardDue;
+    const noteId = Date.now() + cardDueVal;
     const guid = generateGuid();
     const modelId = card.type === 'cloze' ? MODEL_ID_CLOZE : MODEL_ID_BASIC;
     // Basic: Front\x1fBack  |  Cloze: Text\x1fExtra
-    const flds = `${card.front}\x1f${card.back}`;
+    const audioTag = audioFiles?.[idx] ? ` [sound:deck-${idx}.wav]` : '';
+    const flds = `${card.front}${audioTag}\x1f${card.back}`;
     const sfld = card.front;
     const csum = fieldChecksum(sfld);
     const tagsStr = card.tags.length > 0 ? ' ' + card.tags.join(' ') + ' ' : '';
@@ -223,13 +227,13 @@ export async function generateApkgFromDeckCards(
       let i = 0;
       for (const ord of Array.from(ords).sort((a, b) => a - b)) {
         db.run(`INSERT INTO cards VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, [
-          noteId + 1000000 + i, noteId, DECK_ID, ord, now, -1, 0, 0, cardDue, 0, 0, 0, 0, 0, 0, 0, 0, '',
+          noteId + 1000000 + i, noteId, DECK_ID, ord, now, -1, 0, 0, cardDueVal, 0, 0, 0, 0, 0, 0, 0, 0, '',
         ]);
         i++;
       }
     } else {
       db.run(`INSERT INTO cards VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, [
-        noteId + 1000000, noteId, DECK_ID, 0, now, -1, 0, 0, cardDue, 0, 0, 0, 0, 0, 0, 0, 0, '',
+        noteId + 1000000, noteId, DECK_ID, 0, now, -1, 0, 0, cardDueVal, 0, 0, 0, 0, 0, 0, 0, 0, '',
       ]);
     }
 
@@ -242,7 +246,19 @@ export async function generateApkgFromDeckCards(
 
   const zip = new JSZip();
   zip.file('collection.anki2', sqliteBuffer);
-  zip.file('media', '{}');
+
+  const mediaMap: Record<string, string> = {};
+  if (audioFiles) {
+    audioFiles.forEach((wav, idx) => {
+      if (wav) {
+        const mediaIdx = String(idx);
+        const filename = `deck-${idx}.wav`;
+        zip.file(mediaIdx, wav);
+        mediaMap[mediaIdx] = filename;
+      }
+    });
+  }
+  zip.file('media', JSON.stringify(mediaMap));
 
   return zip.generateAsync({
     type: 'nodebuffer',

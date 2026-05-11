@@ -78,7 +78,11 @@ const DEFAULT_CARD_STYLE: Required<CardStyle> = {
 };
 
 export default function DeckBuilder() {
+  const [inputMode, setInputMode] = useState<'file' | 'script'>('file');
   const [files, setFiles] = useState<File[]>([]);
+  const [scriptUrl, setScriptUrl] = useState('');
+  const [scriptText, setScriptText] = useState('');
+  const [isFetchingTranscript, setIsFetchingTranscript] = useState(false);
   const [format, setFormat] = useState<DeckFormat>('auto');
   const [customInstruction, setCustomInstruction] = useState('');
   const [instructionHistory, setInstructionHistory] = useState<string[]>([]);
@@ -192,6 +196,53 @@ export default function DeckBuilder() {
     setIsDragOver(false);
     const dropped = Array.from(e.dataTransfer.files);
     if (dropped.length > 0) void addFiles(dropped);
+  };
+
+  const handleFetchTranscript = async () => {
+    if (!scriptUrl.trim() || isFetchingTranscript) return;
+    setIsFetchingTranscript(true);
+    setError('');
+    try {
+      const res = await fetch('/api/fetch-transcript', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: scriptUrl.trim() }),
+      });
+      const data = await res.json() as { text?: string; error?: string };
+      if (!res.ok || data.error) throw new Error(data.error ?? 'エラー');
+      setScriptText(data.text ?? '');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '字幕の取得に失敗しました。');
+    } finally {
+      setIsFetchingTranscript(false);
+    }
+  };
+
+  const handleAnalyzeTranscript = async () => {
+    if (!scriptText.trim() || isAnalyzing) return;
+    setIsAnalyzing(true);
+    setError('');
+    setCards([]);
+    if (customInstruction.trim()) saveInstructionToHistory(customInstruction);
+    try {
+      const res = await fetch('/api/analyze-transcript', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          text: scriptText,
+          format,
+          customInstruction: customInstruction.trim() || undefined,
+        }),
+      });
+      const data = await res.json() as { cards?: DeckCard[]; error?: string };
+      if (!res.ok || data.error) throw new Error(data.error ?? 'エラー');
+      setCards(data.cards ?? []);
+      if (!deckName && scriptUrl.trim()) setDeckName('英語スクリプト');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'カードの生成に失敗しました。');
+    } finally {
+      setIsAnalyzing(false);
+    }
   };
 
   const handleAnalyze = async () => {
@@ -427,7 +478,88 @@ export default function DeckBuilder() {
       </header>
 
       <div className="max-w-2xl mx-auto px-4 py-6 space-y-5">
-        {/* File Upload Zone */}
+        {/* Input Mode Tabs */}
+        <div className="flex rounded-xl overflow-hidden border border-gray-200 bg-gray-50">
+          {([
+            { mode: 'file', icon: 'M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12', label: 'PDF・画像' },
+            { mode: 'script', icon: 'M15 10l4.553-2.069A1 1 0 0121 8.867V15.1a1 1 0 01-1.447.894L15 14M3 8a2 2 0 012-2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V8z', label: '動画スクリプト' },
+          ] as { mode: 'file' | 'script'; icon: string; label: string }[]).map(({ mode, icon, label }) => (
+            <button
+              key={mode}
+              onClick={() => { setInputMode(mode); setCards([]); setError(''); }}
+              className={`flex-1 flex items-center justify-center gap-2 py-2.5 text-sm font-medium transition-colors ${
+                inputMode === mode
+                  ? 'bg-white text-indigo-700 shadow-sm'
+                  : 'text-gray-500 hover:text-gray-700'
+              }`}
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={icon} />
+              </svg>
+              {label}
+            </button>
+          ))}
+        </div>
+
+        {/* Script Mode: URL + text input */}
+        {inputMode === 'script' && (
+          <div className="space-y-3">
+            {/* YouTube URL input */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                YouTube URL
+                <span className="text-gray-400 font-normal ml-1">（任意）</span>
+              </label>
+              <div className="flex gap-2">
+                <input
+                  type="url"
+                  value={scriptUrl}
+                  onChange={(e) => setScriptUrl(e.target.value)}
+                  placeholder="https://www.youtube.com/watch?v=..."
+                  className="flex-1 rounded-xl border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+                <button
+                  onClick={handleFetchTranscript}
+                  disabled={!scriptUrl.trim() || isFetchingTranscript}
+                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-300 text-white text-sm font-medium rounded-xl transition-colors flex items-center gap-1.5 flex-shrink-0"
+                >
+                  {isFetchingTranscript ? (
+                    <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+                    </svg>
+                  ) : (
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                    </svg>
+                  )}
+                  字幕取得
+                </button>
+              </div>
+              <p className="text-xs text-gray-400 mt-1">TED・英語動画のYouTube URLを貼るとAI字幕を自動取得します</p>
+            </div>
+
+            {/* Transcript text area */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                スクリプト / トランスクリプト
+              </label>
+              <textarea
+                value={scriptText}
+                onChange={(e) => setScriptText(e.target.value)}
+                placeholder="英語スクリプトをここに貼り付けてください。YouTubeのURL取得ボタンで自動入力することもできます。"
+                rows={8}
+                className="w-full rounded-xl border border-gray-300 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-y"
+              />
+              {scriptText && (
+                <p className="text-xs text-gray-400 mt-1">{scriptText.length.toLocaleString()}文字</p>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* File Upload Zone + file list — only in file mode */}
+        {inputMode === 'file' && (
         <div
           onDrop={handleDrop}
           onDragOver={(e) => { e.preventDefault(); setIsDragOver(true); }}
@@ -484,9 +616,10 @@ export default function DeckBuilder() {
             </div>
           )}
         </div>
+        )}
 
-        {/* Selected files list */}
-        {files.length > 0 && (
+        {/* Selected files list — only in file mode */}
+        {inputMode === 'file' && files.length > 0 && (
           <ul className="bg-white rounded-xl border border-gray-200 divide-y divide-gray-100 -mt-2">
             {files.map((f, idx) => (
               <li key={`${f.name}-${idx}`} className="flex items-center justify-between px-3 py-2 text-sm">
@@ -813,8 +946,11 @@ export default function DeckBuilder() {
 
         {/* Generate Button */}
         <button
-          onClick={handleAnalyze}
-          disabled={files.length === 0 || isAnalyzing || isCompressing}
+          onClick={inputMode === 'script' ? handleAnalyzeTranscript : handleAnalyze}
+          disabled={
+            isAnalyzing || isCompressing ||
+            (inputMode === 'file' ? files.length === 0 : !scriptText.trim())
+          }
           className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-300 text-white font-semibold rounded-xl transition-colors flex items-center justify-center gap-2 text-sm"
         >
           {isAnalyzing ? (

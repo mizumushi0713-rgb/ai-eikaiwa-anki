@@ -78,11 +78,13 @@ const DEFAULT_CARD_STYLE: Required<CardStyle> = {
 };
 
 export default function DeckBuilder() {
-  const [inputMode, setInputMode] = useState<'file' | 'script'>('file');
+  const [inputMode, setInputMode] = useState<'file' | 'script' | 'log'>('file');
   const [files, setFiles] = useState<File[]>([]);
   const [scriptUrl, setScriptUrl] = useState('');
   const [scriptText, setScriptText] = useState('');
   const [isFetchingTranscript, setIsFetchingTranscript] = useState(false);
+  const [logText, setLogText] = useState('');
+  const [logType, setLogType] = useState<'chat' | 'gemini_live'>('gemini_live');
   const [format, setFormat] = useState<DeckFormat>('auto');
   const [customInstruction, setCustomInstruction] = useState('');
   const [instructionHistory, setInstructionHistory] = useState<string[]>([]);
@@ -238,6 +240,34 @@ export default function DeckBuilder() {
       if (!res.ok || data.error) throw new Error(data.error ?? 'エラー');
       setCards(data.cards ?? []);
       if (!deckName && scriptUrl.trim()) setDeckName('英語スクリプト');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'カードの生成に失敗しました。');
+    } finally {
+      setIsAnalyzing(false);
+    }
+  };
+
+  const handleAnalyzeLog = async () => {
+    if (!logText.trim() || isAnalyzing) return;
+    setIsAnalyzing(true);
+    setError('');
+    setCards([]);
+    if (customInstruction.trim()) saveInstructionToHistory(customInstruction);
+    try {
+      const res = await fetch('/api/analyze-log', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          text: logText,
+          logType,
+          format,
+          customInstruction: customInstruction.trim() || undefined,
+        }),
+      });
+      const data = await res.json() as { cards?: DeckCard[]; error?: string };
+      if (!res.ok || data.error) throw new Error(data.error ?? 'エラー');
+      setCards(data.cards ?? []);
+      if (!deckName) setDeckName(logType === 'gemini_live' ? 'Gemini Live 会話' : 'AI会話ログ');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'カードの生成に失敗しました。');
     } finally {
@@ -481,19 +511,20 @@ export default function DeckBuilder() {
         {/* Input Mode Tabs */}
         <div className="flex rounded-xl overflow-hidden border border-gray-200 bg-gray-50">
           {([
-            { mode: 'file', icon: 'M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12', label: 'PDF・画像' },
-            { mode: 'script', icon: 'M15 10l4.553-2.069A1 1 0 0121 8.867V15.1a1 1 0 01-1.447.894L15 14M3 8a2 2 0 012-2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V8z', label: '動画スクリプト' },
-          ] as { mode: 'file' | 'script'; icon: string; label: string }[]).map(({ mode, icon, label }) => (
+            { mode: 'file',   icon: 'M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12', label: 'PDF・画像' },
+            { mode: 'script', icon: 'M15 10l4.553-2.069A1 1 0 0121 8.867V15.1a1 1 0 01-1.447.894L15 14M3 8a2 2 0 012-2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V8z', label: '動画' },
+            { mode: 'log',    icon: 'M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z', label: '会話ログ' },
+          ] as { mode: 'file' | 'script' | 'log'; icon: string; label: string }[]).map(({ mode, icon, label }) => (
             <button
               key={mode}
               onClick={() => { setInputMode(mode); setCards([]); setError(''); }}
-              className={`flex-1 flex items-center justify-center gap-2 py-2.5 text-sm font-medium transition-colors ${
+              className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 text-xs font-medium transition-colors ${
                 inputMode === mode
                   ? 'bg-white text-indigo-700 shadow-sm'
                   : 'text-gray-500 hover:text-gray-700'
               }`}
             >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={icon} />
               </svg>
               {label}
@@ -553,6 +584,57 @@ export default function DeckBuilder() {
               />
               {scriptText && (
                 <p className="text-xs text-gray-400 mt-1">{scriptText.length.toLocaleString()}文字</p>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Log Mode: conversation log paste */}
+        {inputMode === 'log' && (
+          <div className="space-y-3">
+            {/* Log type selector */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">ログの種類</label>
+              <div className="flex gap-2">
+                {([
+                  { value: 'gemini_live', label: 'Gemini Live', desc: 'Gemini Liveの会話ログ' },
+                  { value: 'chat',        label: 'AIチャット',  desc: 'このアプリのチャットログ' },
+                ] as { value: 'chat' | 'gemini_live'; label: string; desc: string }[]).map(({ value, label, desc }) => (
+                  <button
+                    key={value}
+                    onClick={() => setLogType(value)}
+                    title={desc}
+                    className={`flex-1 py-2 px-3 rounded-xl border text-sm font-medium transition-colors ${
+                      logType === value
+                        ? 'bg-indigo-50 border-indigo-400 text-indigo-700'
+                        : 'bg-white border-gray-200 text-gray-600 hover:border-gray-300'
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <p className="text-xs text-gray-400 mt-1.5">
+                {logType === 'gemini_live'
+                  ? 'Gemini Liveの画面からコピーしたテキストを貼り付けてください。AIの修正や提案を中心に抽出します。'
+                  : 'このアプリのチャット画面でやり取りしたログを貼り付けてください。'}
+              </p>
+            </div>
+
+            {/* Log text area */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">会話ログ</label>
+              <textarea
+                value={logText}
+                onChange={(e) => setLogText(e.target.value)}
+                placeholder={logType === 'gemini_live'
+                  ? 'Gemini Liveの会話ログをここに貼り付けてください...'
+                  : 'AIチャットの会話ログをここに貼り付けてください...'}
+                rows={10}
+                className="w-full rounded-xl border border-gray-300 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-y"
+              />
+              {logText && (
+                <p className="text-xs text-gray-400 mt-1">{logText.length.toLocaleString()}文字</p>
               )}
             </div>
           </div>
@@ -946,10 +1028,16 @@ export default function DeckBuilder() {
 
         {/* Generate Button */}
         <button
-          onClick={inputMode === 'script' ? handleAnalyzeTranscript : handleAnalyze}
+          onClick={
+            inputMode === 'script' ? handleAnalyzeTranscript
+            : inputMode === 'log'  ? handleAnalyzeLog
+            : handleAnalyze
+          }
           disabled={
             isAnalyzing || isCompressing ||
-            (inputMode === 'file' ? files.length === 0 : !scriptText.trim())
+            (inputMode === 'file'   ? files.length === 0
+            : inputMode === 'script' ? !scriptText.trim()
+            : !logText.trim())
           }
           className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-300 text-white font-semibold rounded-xl transition-colors flex items-center justify-center gap-2 text-sm"
         >

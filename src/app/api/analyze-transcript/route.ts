@@ -10,27 +10,34 @@ const GEMINI_MODELS = [
   'gemini-3.1-flash-lite-preview',
 ];
 
-function buildPrompt(text: string, format: DeckFormat, customInstruction?: string): string {
-  const formatInstructions: Record<DeckFormat, string> = {
-    auto: '英語学習に最も適した形式を自動判断してください。重要フレーズの一問一答、穴埋め、語彙カードなどを混在させても構いません。',
-    basic: 'front に英語フレーズ・表現、back に日本語訳と解説を配置してください。type は "basic" のみ。',
-    cloze: '重要な単語・表現を {{c1::語}} の形式で穴埋めにしてください。複数の穴埋めがある場合もすべて {{c1::}} のみ使用（{{c2::}} 以降は禁止）。type は "cloze" のみ。back には日本語訳や補足解説を入れてください。',
-    dialogue: '会話文は片方の発話を front に、応答を back に配置。type は "basic" を使用。',
-    detailed: '裏面（back）には日本語訳に加え、類似表現・文脈・使い方の解説も詳しく含めてください。type は "basic" を使用。',
-  };
+const FORMAT_INSTRUCTIONS: Record<DeckFormat, string> = {
+  auto:     '英語学習に最も適した形式を自動判断してください。重要フレーズの一問一答、穴埋め、語彙カードなどを混在させても構いません。',
+  basic:    'front に英語フレーズ・表現、back に日本語訳と解説を配置してください。type は "basic" のみ。',
+  cloze:    '重要な単語・表現を {{c1::語}} の形式で穴埋めにしてください。複数の穴埋めがある場合もすべて {{c1::}} のみ使用（{{c2::}} 以降は禁止）。type は "cloze" のみ。back には日本語訳や補足解説を入れてください。',
+  dialogue: '会話文は片方の発話を front に、応答を back に配置。type は "basic" を使用。',
+  detailed: '裏面（back）には日本語訳に加え、類似表現・文脈・使い方の解説も詳しく含めてください。type は "basic" を使用。',
+};
 
-  const customSection = customInstruction?.trim()
-    ? `\n\n【ユーザーからの追加指示（最優先で従うこと）】\n${customInstruction.trim()}`
-    : '';
+function buildSystemInstruction(customInstruction?: string): string {
+  const base = `あなたは英語学習用Ankiフラッシュカード作成の専門家です。
+出力はJSONのみとし、前後に説明文・コードブロックは一切付けないでください。
+HTMLタグ（<span style="color:red">...</span>、<b>...</b> など）を front/back に使って装飾しても構いません。`;
+  if (!customInstruction?.trim()) return base;
+  return `${base}
 
-  return `あなたは英語学習用Ankiフラッシュカード作成の専門家です。
-以下の英語スクリプト（動画字幕やトランスクリプト）を分析し、英語学習に役立つカードを生成してください。
+【ユーザーからの追加指示 — 絶対に守ること】
+${customInstruction.trim()}
+上記の追加指示はすべてのカードに必ず適用し、一切省略・無視しないでください。`;
+}
+
+function buildPrompt(text: string, format: DeckFormat): string {
+  return `以下の英語スクリプト（動画字幕やトランスクリプト）を分析し、英語学習に役立つカードを生成してください。
 
 【スクリプト】
 ${text.slice(0, 8000)}
 
 【カード形式の指示】
-${formatInstructions[format]}${customSection}
+${FORMAT_INSTRUCTIONS[format]}
 
 【重要な方針】
 - 日常会話・プレゼン・講演で実際に使われる自然な英語表現を優先的に抽出
@@ -56,13 +63,12 @@ function parseCards(rawText: string): DeckCard[] {
     .replace(/\s*```$/i, '')
     .trim();
   const parsed = JSON.parse(cleaned) as { cards: Omit<DeckCard, 'id'>[] };
-  const raw = parsed.cards ?? [];
-  return raw.map((c, i) => ({
+  return (parsed.cards ?? []).map((c, i) => ({
     id: `transcript-card-${i}-${Date.now()}`,
     front: String(c.front ?? ''),
-    back: String(c.back ?? ''),
-    tags: Array.isArray(c.tags) ? c.tags.map(String) : [],
-    type: c.type === 'cloze' ? 'cloze' : 'basic',
+    back:  String(c.back  ?? ''),
+    tags:  Array.isArray(c.tags) ? c.tags.map(String) : [],
+    type:  c.type === 'cloze' ? 'cloze' : 'basic',
   }));
 }
 
@@ -79,15 +85,16 @@ export async function POST(req: NextRequest) {
       return Response.json({ error: 'テキストが必要です' }, { status: 400 });
     }
 
-    const prompt = buildPrompt(text, format, customInstruction);
+    const systemInstruction = buildSystemInstruction(customInstruction);
+    const prompt = buildPrompt(text, format);
     let lastError: unknown;
 
     for (const modelId of GEMINI_MODELS) {
       try {
-        const model = genAI.getGenerativeModel({ model: modelId });
+        const model = genAI.getGenerativeModel({ model: modelId, systemInstruction });
         const result = await model.generateContent(prompt);
         const cards = parseCards(result.response.text());
-        if (cards.length === 0) throw new Error('カードが生成されませんでした');
+        if (cards.length === 0) throw new Error('生成されたカードが0件でした');
         return Response.json({ cards });
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);

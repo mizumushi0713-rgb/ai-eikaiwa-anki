@@ -10,25 +10,33 @@ const GEMINI_MODELS = [
   'gemini-3.1-flash-lite-preview',
 ];
 
-function buildPrompt(format: DeckFormat, customInstruction?: string): string {
-  const formatInstructions: Record<DeckFormat, string> = {
-    auto: '教材の性質に最も適した形式を自動判断してください。一問一答、穴埋め、対話形式などを混在させても構いません。',
-    basic: '表面（front）に用語・問い、裏面（back）に答え・定義を配置してください。type は "basic" のみ使用。',
-    cloze: '重要な用語や概念を {{c1::用語}} の形式で穴埋めにしてください。複数の穴埋めがある場合もすべて {{c1::}} のみ使用し、{{c2::}} 以降は絶対に使わないでください（一度の回答表示で全答えが見えるようにするため）。type は "cloze" のみ使用。back には補足解説を入れてください。',
-    dialogue: '会話文や問答がある場合は片方の発話を front に、応答を back に配置してください。type は "basic" を使用。',
-    detailed: '裏面（back）には答えだけでなく、教材内の関連解説・文脈も詳しく含めてください。type は "basic" を使用。',
-  };
+const FORMAT_INSTRUCTIONS: Record<DeckFormat, string> = {
+  auto:     '教材の性質に最も適した形式を自動判断してください。一問一答、穴埋め、対話形式などを混在させても構いません。',
+  basic:    '表面（front）に用語・問い、裏面（back）に答え・定義を配置してください。type は "basic" のみ使用。',
+  cloze:    '重要な用語や概念を {{c1::用語}} の形式で穴埋めにしてください。複数の穴埋めがある場合もすべて {{c1::}} のみ使用し、{{c2::}} 以降は絶対に使わないでください。type は "cloze" のみ使用。back には補足解説を入れてください。',
+  dialogue: '会話文や問答がある場合は片方の発話を front に、応答を back に配置してください。type は "basic" を使用。',
+  detailed: '裏面（back）には答えだけでなく、教材内の関連解説・文脈も詳しく含めてください。type は "basic" を使用。',
+};
 
-  const customSection = customInstruction?.trim()
-    ? `\n\n【ユーザーからの追加指示（最優先で従うこと）】\n${customInstruction.trim()}\n` +
-      `※HTMLタグ（<span style="color:red">...</span> や <b>...</b> など）を front/back に含めて装飾しても構いません。`
-    : '';
+/** System instruction: expert persona + user's custom directive (high-priority channel). */
+function buildSystemInstruction(customInstruction?: string): string {
+  const base = `あなたはAnkiフラッシュカード作成の専門家です。
+出力はJSONのみとし、前後に説明文・コードブロックは一切付けないでください。
+HTMLタグ（<span style="color:red">...</span>、<b>...</b> など）を front/back に使って装飾しても構いません。`;
+  if (!customInstruction?.trim()) return base;
+  return `${base}
 
-  return `あなたはAnkiフラッシュカード作成の専門家です。
-提供された教材（PDF・画像）を分析し、学習に役立つカードを生成してください。
+【ユーザーからの追加指示 — 絶対に守ること】
+${customInstruction.trim()}
+上記の追加指示はすべてのカードに必ず適用し、一切省略・無視しないでください。`;
+}
+
+/** Main prompt: format rules + JSON schema (no custom instruction here). */
+function buildPrompt(format: DeckFormat): string {
+  return `提供された教材（PDF・画像）を分析し、学習に役立つAnkiカードを生成してください。
 
 【カード形式の指示】
-${formatInstructions[format]}${customSection}
+${FORMAT_INSTRUCTIONS[format]}
 
 以下のJSON形式のみで返してください（コードブロック不要）：
 {"cards":[{"front":"表面テキスト","back":"裏面テキスト","tags":["タグ1"],"type":"basic"}]}
@@ -39,7 +47,7 @@ ${formatInstructions[format]}${customSection}
 - tags は教材のカテゴリや単元名（1〜2個）
 - 日本語教材なら日本語で、英語教材なら英語メインでカードを作成
 - 目標：10〜20枚の高品質カード
-- JSONのみを返す（前後に説明文不要）`;
+- JSONのみを返す`;
 }
 
 function parseCards(rawText: string): DeckCard[] {
@@ -85,12 +93,13 @@ export async function POST(req: NextRequest) {
       return Response.json({ error: 'ファイルデータが必要です' }, { status: 400 });
     }
 
-    const prompt = buildPrompt(format, customInstruction);
+    const systemInstruction = buildSystemInstruction(customInstruction);
+    const prompt = buildPrompt(format);
     let lastError: unknown;
 
     for (const modelId of GEMINI_MODELS) {
       try {
-        const model = genAI.getGenerativeModel({ model: modelId });
+        const model = genAI.getGenerativeModel({ model: modelId, systemInstruction });
         const parts = [
           ...fileList.map((f) => ({
             inlineData: { mimeType: f.mimeType, data: f.fileData },
@@ -101,6 +110,7 @@ export async function POST(req: NextRequest) {
 
         const rawText = result.response.text();
         const cards = parseCards(rawText);
+        if (cards.length === 0) throw new Error('生成されたカードが0件でした');
         console.log(`[analyze-file] model: ${modelId}, cards: ${cards.length}`);
         return Response.json({ cards });
       } catch (err: unknown) {

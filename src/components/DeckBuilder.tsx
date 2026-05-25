@@ -1021,9 +1021,20 @@ export default function DeckBuilder() {
         </div>
 
         {error && (
-          <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-xl px-4 py-3">
-            {error}
-          </p>
+          <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-3 flex items-start justify-between gap-3">
+            <p className="text-sm text-red-600 flex-1">{error}</p>
+            <button
+              onClick={() => {
+                setError('');
+                if (inputMode === 'script') handleAnalyzeTranscript();
+                else if (inputMode === 'log') handleAnalyzeLog();
+                else handleAnalyze();
+              }}
+              className="text-xs text-red-600 border border-red-300 rounded-lg px-2 py-1 hover:bg-red-100 flex-shrink-0 font-medium"
+            >
+              再試行
+            </button>
+          </div>
         )}
 
         {/* Generate Button */}

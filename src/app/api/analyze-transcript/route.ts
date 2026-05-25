@@ -30,7 +30,14 @@ ${customInstruction.trim()}
 上記の追加指示はすべてのカードに必ず適用し、一切省略・無視しないでください。`;
 }
 
-function buildPrompt(text: string, format: DeckFormat): string {
+function buildPrompt(text: string, format: DeckFormat, hasCustomInstruction: boolean): string {
+  const defaultLangRule = hasCustomInstruction
+    ? ''
+    : '- back には必ず日本語訳を含める\n';
+  const jsonExample = hasCustomInstruction
+    ? '{"cards":[{"front":"表面テキスト","back":"裏面テキスト","tags":["タグ"],"type":"basic"}]}'
+    : '{"cards":[{"front":"英語テキスト","back":"日本語訳と解説","tags":["タグ"],"type":"basic"}]}';
+
   return `以下の英語スクリプト（動画字幕やトランスクリプト）を分析し、英語学習に役立つカードを生成してください。
 
 【スクリプト】
@@ -44,10 +51,9 @@ ${FORMAT_INSTRUCTIONS[format]}
 - 文脈の中で意味が分かる形でカードを作る（文章ごと残してclozeにするのも良い）
 - 初・中級者が覚えると役立つ語彙・フレーズに絞る
 - front の英語テキストはスクリプトから直接引用するか、自然に短縮したもの
-- back には必ず日本語訳を含める
-
+${defaultLangRule}
 以下のJSON形式のみで返してください（コードブロック不要）：
-{"cards":[{"front":"英語テキスト","back":"日本語訳と解説","tags":["タグ"],"type":"basic"}]}
+${jsonExample}
 
 ルール：
 - type は "basic" または "cloze" のみ
@@ -85,8 +91,9 @@ export async function POST(req: NextRequest) {
       return Response.json({ error: 'テキストが必要です' }, { status: 400 });
     }
 
+    const hasCustomInstruction = !!customInstruction?.trim();
     const systemInstruction = buildSystemInstruction(customInstruction);
-    const prompt = buildPrompt(text, format);
+    const prompt = buildPrompt(text, format, hasCustomInstruction);
     let lastError: unknown;
 
     for (const modelId of GEMINI_MODELS) {

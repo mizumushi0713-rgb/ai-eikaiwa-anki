@@ -92,10 +92,22 @@ function buildPrompt(
   format: DeckFormat,
   chunkLabel: string,
   targetCards: number,
+  hasCustomInstruction: boolean,
 ): string {
   const intro = logType === 'gemini_live'
     ? `Gemini Live 会話ログ${chunkLabel}から、学習価値の高い英語表現をAnkiカードとして抽出してください。`
     : `AIチャット会話ログ${chunkLabel}から、学習価値の高い英語表現をAnkiカードとして抽出してください。`;
+
+  // Default language rule: only applied when there is NO custom instruction.
+  // If the user specified front/back language themselves, this line would conflict.
+  const defaultLangRule = hasCustomInstruction
+    ? ''
+    : '- back には必ず日本語訳を含める\n- 例文がある場合は英語の後に日本語訳を括弧で添える\n';
+
+  // JSON schema example: neutral when custom instruction governs layout
+  const jsonExample = hasCustomInstruction
+    ? '{"cards":[{"front":"表面テキスト","back":"裏面テキスト","tags":["タグ"],"type":"basic"}]}'
+    : '{"cards":[{"front":"英語表現","back":"日本語訳と解説","tags":["タグ"],"type":"basic"}]}';
 
   return `${intro}
 
@@ -106,13 +118,11 @@ ${chunk}
 ${FORMAT_INSTRUCTIONS[format]}
 
 【共通ルール】
-- back には必ず日本語訳を含める
-- 例文がある場合は英語の後に日本語訳を括弧で添える
-- tags は会話のトピックや単元（1〜2個）
+${defaultLangRule}- tags は会話のトピックや単元（1〜2個）
 - このブロックから ${targetCards} 枚程度の高品質カードを抽出する（重要な表現を見逃さないこと）
 
 以下のJSON形式のみで返してください（コードブロック不要）：
-{"cards":[{"front":"英語表現","back":"日本語訳と解説","tags":["タグ"],"type":"basic"}]}
+${jsonExample}
 
 ルール：
 - type は "basic" または "cloze" のみ
@@ -173,13 +183,13 @@ export async function POST(req: NextRequest) {
     const totalChunks = chunks.length;
     const targetPerChunk = totalChunks === 1 ? 20 : 12;
 
-    // Build systemInstruction once (contains persona + log rules + custom directive)
+    const hasCustomInstruction = !!customInstruction?.trim();
     const systemInstruction = buildSystemInstruction(logType, customInstruction);
     const allCards: DeckCard[] = [];
 
     for (let i = 0; i < chunks.length; i++) {
       const chunkLabel = totalChunks > 1 ? `（${i + 1}/${totalChunks}ブロック目）` : '';
-      const prompt = buildPrompt(chunks[i], logType, format, chunkLabel, targetPerChunk);
+      const prompt = buildPrompt(chunks[i], logType, format, chunkLabel, targetPerChunk, hasCustomInstruction);
       try {
         const raw = await callGemini(prompt, systemInstruction);
         const cards = parseCards(raw, i);

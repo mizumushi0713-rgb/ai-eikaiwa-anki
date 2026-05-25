@@ -32,7 +32,12 @@ ${customInstruction.trim()}
 }
 
 /** Main prompt: format rules + JSON schema (no custom instruction here). */
-function buildPrompt(format: DeckFormat): string {
+function buildPrompt(format: DeckFormat, hasCustomInstruction: boolean): string {
+  // When user specifies front/back language, don't override with a hardcoded default.
+  const defaultLangRule = hasCustomInstruction
+    ? ''
+    : '- 日本語教材なら日本語で、英語教材なら英語メインでカードを作成\n';
+
   return `提供された教材（PDF・画像）を分析し、学習に役立つAnkiカードを生成してください。
 
 【カード形式の指示】
@@ -45,8 +50,7 @@ ${FORMAT_INSTRUCTIONS[format]}
 - type は "basic" または "cloze" のみ
 - cloze の場合、front に {{c1::重要語}} の形式を必ず使用（{{c2::}} 以降は使用禁止）
 - tags は教材のカテゴリや単元名（1〜2個）
-- 日本語教材なら日本語で、英語教材なら英語メインでカードを作成
-- 目標：10〜20枚の高品質カード
+${defaultLangRule}- 目標：10〜20枚の高品質カード
 - JSONのみを返す`;
 }
 
@@ -93,8 +97,9 @@ export async function POST(req: NextRequest) {
       return Response.json({ error: 'ファイルデータが必要です' }, { status: 400 });
     }
 
+    const hasCustomInstruction = !!customInstruction?.trim();
     const systemInstruction = buildSystemInstruction(customInstruction);
-    const prompt = buildPrompt(format);
+    const prompt = buildPrompt(format, hasCustomInstruction);
     let lastError: unknown;
 
     for (const modelId of GEMINI_MODELS) {

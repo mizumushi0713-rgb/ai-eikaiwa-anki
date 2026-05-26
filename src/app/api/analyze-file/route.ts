@@ -1,14 +1,9 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { NextRequest } from 'next/server';
 import type { DeckCard, DeckFormat } from '@/lib/types';
+import { GEMINI_MODELS } from '@/lib/models';
 
 const genAI = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY ?? '');
-
-const GEMINI_MODELS = [
-  'gemini-2.5-flash',
-  'gemini-2.5-flash-lite',
-  'gemini-3.1-flash-lite-preview',
-];
 
 const FORMAT_INSTRUCTIONS: Record<DeckFormat, string> = {
   auto:     '教材の性質に最も適した形式を自動判断してください。一問一答、穴埋め、対話形式などを混在させても構いません。',

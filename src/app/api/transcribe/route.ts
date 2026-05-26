@@ -1,5 +1,6 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { NextRequest } from 'next/server';
+import { GEMINI_STT_MODEL } from '@/lib/models';
 
 const genAI = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY ?? '');
 
@@ -19,7 +20,7 @@ export async function POST(req: NextRequest) {
     const langLabel = lang.startsWith('ja') ? '日本語' : '英語';
     const prompt = `この音声を正確に${langLabel}で文字起こししてください。文字起こし結果のテキストのみを返してください。余計な説明や前置きは不要です。音声が聞き取れない場合は空文字を返してください。`;
 
-    const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+    const model = genAI.getGenerativeModel({ model: GEMINI_STT_MODEL });
     const result = await model.generateContent([
       { text: prompt },
       {

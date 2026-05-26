@@ -2,17 +2,11 @@ import Anthropic from '@anthropic-ai/sdk';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { NextRequest } from 'next/server';
 import type { ChatRequest } from '@/lib/types';
+import { GEMINI_MODELS, CLAUDE_CHAT_MODEL } from '@/lib/models';
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const genAI = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY ?? '');
 
-// 品質順・RPD順に並べたフォールバックリスト
-// 429（枠切れ）が出たら自動的に次のモデルへ
-const GEMINI_MODELS = [
-  'gemini-2.5-flash',           // 最高品質 (20 RPD)
-  'gemini-2.5-flash-lite',      // 軽量版   (20 RPD)
-  'gemini-3.1-flash-lite-preview', // 最大枠 (500 RPD)
-];
 
 const SYSTEM_PROMPT = `あなたは日本語で話す、親切で熱心な英語学習サポートAIです。
 
@@ -34,7 +28,7 @@ async function streamClaude(
   messages: { role: 'user' | 'assistant'; content: string }[]
 ): Promise<ReadableStream> {
   const stream = anthropic.messages.stream({
-    model: 'claude-sonnet-4-6',
+    model: CLAUDE_CHAT_MODEL,
     system: SYSTEM_PROMPT,
     max_tokens: 1024,
     messages,

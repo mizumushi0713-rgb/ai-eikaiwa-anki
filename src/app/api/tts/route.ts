@@ -1,5 +1,6 @@
 import { GoogleGenAI } from '@google/genai';
 import { NextRequest } from 'next/server';
+import { GEMINI_TTS_MODEL } from '@/lib/models';
 
 const ai = new GoogleGenAI({ apiKey: process.env.GOOGLE_API_KEY ?? '' });
 
@@ -34,7 +35,7 @@ export async function POST(req: NextRequest) {
     }
 
     const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash-preview-tts',
+      model: GEMINI_TTS_MODEL,
       contents: [{ parts: [{ text }] }],
       config: {
         responseModalities: ['AUDIO'],

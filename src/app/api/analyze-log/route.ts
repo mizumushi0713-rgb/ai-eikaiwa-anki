@@ -1,14 +1,9 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { NextRequest } from 'next/server';
 import type { DeckCard, DeckFormat } from '@/lib/types';
+import { GEMINI_MODELS } from '@/lib/models';
 
 const genAI = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY ?? '');
-
-const GEMINI_MODELS = [
-  'gemini-2.5-flash',
-  'gemini-2.5-flash-lite',
-  'gemini-3.1-flash-lite-preview',
-];
 
 // Chunk settings — keep each chunk well within Gemini's input limit
 // while staying under Vercel's 60 s function timeout when processed sequentially.

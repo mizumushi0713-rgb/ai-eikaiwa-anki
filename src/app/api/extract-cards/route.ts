@@ -2,6 +2,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { NextRequest } from 'next/server';
 import type { ExtractCardsRequest, ExtractCardsResponse } from '@/lib/types';
+import { GEMINI_MODELS, CLAUDE_MODEL } from '@/lib/models';
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const genAI = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY ?? '');
@@ -68,7 +69,7 @@ function parseCards(rawText: string): ExtractCardsResponse {
 async function extractWithClaude(conversationText: string, isLog: boolean): Promise<ExtractCardsResponse> {
   const systemPrompt = isLog ? LOG_EXTRACTION_PROMPT : EXTRACTION_PROMPT;
   const response = await anthropic.messages.create({
-    model: 'claude-haiku-4-5-20251001',
+    model: CLAUDE_MODEL,
     system: systemPrompt,
     max_tokens: 4096,
     messages: [{ role: 'user', content: `以下の会話からAnkiカードを抽出してください：\n\n${conversationText}` }],
@@ -76,12 +77,6 @@ async function extractWithClaude(conversationText: string, isLog: boolean): Prom
   const rawText = response.content[0].type === 'text' ? response.content[0].text : '';
   return parseCards(rawText);
 }
-
-const GEMINI_MODELS = [
-  'gemini-2.5-flash',
-  'gemini-2.5-flash-lite',
-  'gemini-3.1-flash-lite-preview',
-];
 
 async function extractWithGemini(conversationText: string, isLog: boolean): Promise<ExtractCardsResponse> {
   const systemPrompt = isLog ? LOG_EXTRACTION_PROMPT : EXTRACTION_PROMPT;

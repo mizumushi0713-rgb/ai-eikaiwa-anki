@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect } from 'react';
 import Link from 'next/link';
 import type { DeckCard, DeckFormat, CardStyle } from '@/lib/types';
+import CropModal from './CropModal';
 
 const FORMAT_OPTIONS: { value: DeckFormat; label: string; desc: string }[] = [
   { value: 'auto', label: 'おまかせ', desc: 'AIが最適な形式を自動判断' },
@@ -107,6 +108,9 @@ export default function DeckBuilder() {
   const [cardStyle, setCardStyle] = useState<Required<CardStyle>>(DEFAULT_CARD_STYLE);
   const [showStyle, setShowStyle] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  // Crop queue: images waiting to be cropped before being added to files[]
+  const [cropQueue, setCropQueue] = useState<File[]>([]);
+  const pendingFilesRef = useRef<File[]>([]); // non-image files that skip crop
 
   // Load instruction history from localStorage on mount
   useEffect(() => {
@@ -141,27 +145,11 @@ export default function DeckBuilder() {
   const VALID_TYPES = ['application/pdf', 'image/jpeg', 'image/png', 'image/webp'];
   const [isCompressing, setIsCompressing] = useState(false);
 
-  const addFiles = async (newFiles: File[]) => {
-    // Pre-filter format / size before compression
-    const accepted: File[] = [];
-    const rejected: string[] = [];
-    for (const f of newFiles) {
-      if (!VALID_TYPES.includes(f.type)) {
-        rejected.push(`${f.name}（非対応形式）`);
-        continue;
-      }
-      if (f.size > MAX_INPUT_FILE_SIZE) {
-        rejected.push(`${f.name}（${(f.size / 1024 / 1024).toFixed(0)}MB超）`);
-        continue;
-      }
-      accepted.push(f);
-    }
-    if (rejected.length > 0) {
-      setError(`追加できなかったファイル: ${rejected.join(', ')}`);
-    }
+  /** Add files that have already been through crop (and will be compressed). */
+  const addFilesAfterCrop = async (accepted: File[], rejected: string[]) => {
+    if (rejected.length > 0) setError(`追加できなかったファイル: ${rejected.join(', ')}`);
     if (accepted.length === 0) return;
 
-    // Compress images in parallel
     setIsCompressing(true);
     let compressed: File[];
     try {
@@ -186,6 +174,30 @@ export default function DeckBuilder() {
 
     if (!deckName && compressed.length > 0) {
       setDeckName(compressed[0].name.replace(/\.[^.]+$/, ''));
+    }
+  };
+
+  const addFiles = (newFiles: File[]) => {
+    const images: File[] = [];
+    const nonImages: File[] = [];
+    const rejected: string[] = [];
+
+    for (const f of newFiles) {
+      if (!VALID_TYPES.includes(f.type)) { rejected.push(`${f.name}（非対応形式）`); continue; }
+      if (f.size > MAX_INPUT_FILE_SIZE) { rejected.push(`${f.name}（${(f.size / 1024 / 1024).toFixed(0)}MB超）`); continue; }
+      if (f.type.startsWith('image/')) images.push(f);
+      else nonImages.push(f);
+    }
+
+    if (rejected.length > 0) setError(`追加できなかったファイル: ${rejected.join(', ')}`);
+
+    // PDFs skip crop and go straight through
+    if (nonImages.length > 0) void addFilesAfterCrop(nonImages, []);
+
+    // Images go into the crop queue; pendingFilesRef carries rejected info for later
+    if (images.length > 0) {
+      pendingFilesRef.current = []; // reset any leftover
+      setCropQueue(images);
     }
   };
 
@@ -488,8 +500,27 @@ export default function DeckBuilder() {
     }
   };
 
+  // Crop modal handlers
+  const handleCropConfirm = (cropped: File) => {
+    void addFilesAfterCrop([cropped], []);
+    setCropQueue((q) => q.slice(1));
+  };
+  const handleCropSkip = () => {
+    const original = cropQueue[0];
+    if (original) void addFilesAfterCrop([original], []);
+    setCropQueue((q) => q.slice(1));
+  };
+
   return (
     <div className="min-h-screen bg-gray-50">
+      {/* Crop Modal — shown for the first image in the queue */}
+      {cropQueue.length > 0 && (
+        <CropModal
+          file={cropQueue[0]}
+          onConfirm={handleCropConfirm}
+          onSkip={handleCropSkip}
+        />
+      )}
       {/* Header */}
       <header className="bg-white border-b border-gray-200 px-4 py-3 flex items-center gap-3 sticky top-0 z-10 shadow-sm">
         <Link

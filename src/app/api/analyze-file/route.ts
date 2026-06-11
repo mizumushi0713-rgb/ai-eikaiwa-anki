@@ -13,17 +13,35 @@ const FORMAT_INSTRUCTIONS: Record<DeckFormat, string> = {
   detailed: '裏面（back）には答えだけでなく、教材内の関連解説・文脈も詳しく含めてください。type は "basic" を使用。',
 };
 
+type Example = { front: string; back: string; type: string };
+
+function formatExamples(examples?: Example[]): string {
+  if (!examples || examples.length === 0) return '';
+  const list = examples
+    .map((e, i) => `[例${i + 1}] type=${e.type}\n  front: ${e.front}\n  back:  ${e.back}`)
+    .join('\n');
+  return `
+
+【お手本 — 過去に高評価されたカードのフォーマット】
+以下のサンプルカードと同じスタイル・構造・言語配置・装飾レベルで生成してください。
+${list}`;
+}
+
 /** System instruction: expert persona + user's custom directive (high-priority channel). */
-function buildSystemInstruction(customInstruction?: string): string {
+function buildSystemInstruction(customInstruction?: string, examples?: Example[]): string {
   const base = `あなたはAnkiフラッシュカード作成の専門家です。
 出力はJSONのみとし、前後に説明文・コードブロックは一切付けないでください。
 HTMLタグ（<span style="color:red">...</span>、<b>...</b> など）を front/back に使って装飾しても構いません。`;
-  if (!customInstruction?.trim()) return base;
-  return `${base}
+  let result = base;
+  if (customInstruction?.trim()) {
+    result += `
 
 【ユーザーからの追加指示 — 絶対に守ること】
 ${customInstruction.trim()}
 上記の追加指示はすべてのカードに必ず適用し、一切省略・無視しないでください。`;
+  }
+  result += formatExamples(examples);
+  return result;
 }
 
 /** Main prompt: format rules + JSON schema (no custom instruction here). */
@@ -78,9 +96,10 @@ export async function POST(req: NextRequest) {
       mimeType?: string;
       format: DeckFormat;
       customInstruction?: string;
+      examples?: Example[];
     };
 
-    const { files, fileData, mimeType, format = 'auto', customInstruction } = body;
+    const { files, fileData, mimeType, format = 'auto', customInstruction, examples } = body;
 
     const fileList = files && files.length > 0
       ? files
@@ -93,7 +112,7 @@ export async function POST(req: NextRequest) {
     }
 
     const hasCustomInstruction = !!customInstruction?.trim();
-    const systemInstruction = buildSystemInstruction(customInstruction);
+    const systemInstruction = buildSystemInstruction(customInstruction, examples);
     const prompt = buildPrompt(format, hasCustomInstruction);
     let lastError: unknown;
 

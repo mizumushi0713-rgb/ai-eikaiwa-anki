@@ -4,6 +4,13 @@ import { useState, useRef, useEffect } from 'react';
 import Link from 'next/link';
 import type { DeckCard, DeckFormat, CardStyle } from '@/lib/types';
 import CropModal from './CropModal';
+import {
+  loadPatterns,
+  savePattern,
+  deletePattern,
+  findPattern,
+  type FavoritePattern,
+} from '@/lib/favoritePatterns';
 
 const FORMAT_OPTIONS: { value: DeckFormat; label: string; desc: string }[] = [
   { value: 'auto', label: 'おまかせ', desc: 'AIが最適な形式を自動判断' },
@@ -112,13 +119,43 @@ export default function DeckBuilder() {
   const [cropQueue, setCropQueue] = useState<File[]>([]);
   const pendingFilesRef = useRef<File[]>([]); // non-image files that skip crop
 
-  // Load instruction history from localStorage on mount
+  // Favorite patterns (instruction → sample cards) for stable repeat generation
+  const [patterns, setPatterns] = useState<FavoritePattern[]>([]);
+  const [showPatterns, setShowPatterns] = useState(false);
+  const [patternSaved, setPatternSaved] = useState(false);
+
+  // Load instruction history + favorite patterns from localStorage on mount
   useEffect(() => {
     try {
       const saved = localStorage.getItem('deckbuilder_instruction_history');
       if (saved) setInstructionHistory(JSON.parse(saved) as string[]);
     } catch { /* ignore */ }
+    setPatterns(loadPatterns());
   }, []);
+
+  // Pattern matched against the current instruction (for the indicator)
+  const matchedPattern = customInstruction.trim()
+    ? findPattern(customInstruction)
+    : null;
+
+  const handleSavePattern = () => {
+    const instr = customInstruction.trim();
+    if (!instr || cards.length === 0) return;
+    const samples = cards.slice(0, 3).map((c) => ({
+      front: c.front,
+      back: c.back,
+      type: c.type,
+    }));
+    savePattern(instr, samples);
+    setPatterns(loadPatterns());
+    setPatternSaved(true);
+    setTimeout(() => setPatternSaved(false), 2500);
+  };
+
+  const handleDeletePattern = (id: string) => {
+    deletePattern(id);
+    setPatterns(loadPatterns());
+  };
 
   const saveInstructionToHistory = (text: string) => {
     const trimmed = text.trim();
@@ -246,6 +283,7 @@ export default function DeckBuilder() {
           text: scriptText,
           format,
           customInstruction: customInstruction.trim() || undefined,
+          examples: matchedPattern?.samples,
         }),
       });
       const data = await res.json() as { cards?: DeckCard[]; error?: string };
@@ -274,6 +312,7 @@ export default function DeckBuilder() {
           logType,
           format,
           customInstruction: customInstruction.trim() || undefined,
+          examples: matchedPattern?.samples,
         }),
       });
       const data = await res.json() as { cards?: DeckCard[]; error?: string };
@@ -316,6 +355,7 @@ export default function DeckBuilder() {
           files: fileList,
           format,
           customInstruction: customInstruction.trim() || undefined,
+          examples: matchedPattern?.samples,
         }),
       });
 
@@ -1049,6 +1089,16 @@ export default function DeckBuilder() {
           <p className="text-xs text-gray-400 mt-1">
             HTMLタグ（&lt;span style=&quot;color:red&quot;&gt;...&lt;/span&gt;など）も使えます · カード生成時に自動保存
           </p>
+
+          {/* Pattern-matched indicator */}
+          {matchedPattern && (
+            <div className="mt-2 flex items-center gap-2 text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2">
+              <span>👍</span>
+              <span className="flex-1">
+                この指示には<b>お手本{matchedPattern.samples.length}枚</b>が保存されています。次の生成に自動で適用されます。
+              </span>
+            </div>
+          )}
         </div>
 
         {error && (
@@ -1109,6 +1159,15 @@ export default function DeckBuilder() {
                 {cards.length}枚のカード
               </h2>
               <div className="flex items-center gap-2">
+                {customInstruction.trim() && (
+                  <button
+                    onClick={handleSavePattern}
+                    className="text-xs text-emerald-600 hover:text-emerald-700 font-medium flex items-center gap-1"
+                    title="この指示と生成結果をお手本として保存。次回以降、同じ指示で安定生成"
+                  >
+                    👍 お手本保存
+                  </button>
+                )}
                 <button
                   onClick={handleQualityCheck}
                   disabled={isQualityChecking}
@@ -1142,6 +1201,12 @@ export default function DeckBuilder() {
             {qualityMessage && (
               <p className="text-xs text-violet-700 bg-violet-50 border border-violet-200 rounded-lg px-3 py-2 mb-3">
                 {qualityMessage}
+              </p>
+            )}
+
+            {patternSaved && (
+              <p className="text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2 mb-3">
+                ✓ お手本として保存しました。次回同じ指示で生成すると自動で適用されます。
               </p>
             )}
 
@@ -1272,6 +1337,70 @@ export default function DeckBuilder() {
             </button>
           </div>
         )}
+      </div>
+
+      {/* Saved favorite patterns management */}
+      <div className="max-w-lg mx-auto px-4 pb-3">
+        <details
+          className="bg-white rounded-2xl border border-gray-200 shadow-sm"
+          open={showPatterns}
+          onToggle={(e) => setShowPatterns((e.target as HTMLDetailsElement).open)}
+        >
+          <summary className="px-5 py-4 cursor-pointer text-sm font-medium text-gray-700 flex items-center gap-2 select-none list-none">
+            <span className="text-emerald-500">👍</span>
+            保存済みのお手本パターン
+            <span className="ml-auto text-xs text-gray-400 font-normal">{patterns.length}件</span>
+          </summary>
+          <div className="px-5 pb-5 pt-2 space-y-3">
+            <p className="text-xs text-gray-500">
+              ここに保存された「追加指示 + お手本カード」は、同じ指示でカード生成するときに自動でAIへ渡され、
+              出力フォーマットが安定します。
+            </p>
+            {patterns.length === 0 ? (
+              <p className="text-xs text-gray-400 italic">
+                まだ保存されたパターンはありません。カード生成後に「👍 お手本保存」を押すと追加されます。
+              </p>
+            ) : (
+              <ul className="space-y-2 max-h-96 overflow-y-auto">
+                {patterns.map((p) => (
+                  <li key={p.id} className="border border-gray-200 rounded-xl p-3 bg-gray-50">
+                    <div className="flex items-start justify-between gap-2 mb-2">
+                      <p className="text-xs text-gray-700 whitespace-pre-wrap flex-1 leading-relaxed">
+                        <span className="font-semibold text-emerald-700">指示：</span>
+                        {p.instruction}
+                      </p>
+                      <button
+                        onClick={() => handleDeletePattern(p.id)}
+                        className="text-gray-300 hover:text-red-500 flex-shrink-0"
+                        title="このパターンを削除"
+                      >
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6M1 7h22M9 7V4a1 1 0 011-1h4a1 1 0 011 1v3" />
+                        </svg>
+                      </button>
+                    </div>
+                    <details>
+                      <summary className="text-xs text-indigo-600 cursor-pointer hover:text-indigo-700">
+                        お手本カード {p.samples.length}枚を表示
+                      </summary>
+                      <ul className="mt-2 space-y-1.5">
+                        {p.samples.map((s, i) => (
+                          <li key={i} className="text-xs bg-white rounded-lg border border-gray-200 px-2 py-1.5">
+                            <div className="text-gray-500">
+                              <span className="font-mono text-[10px] bg-gray-100 px-1 rounded mr-1">{s.type}</span>
+                              <span className="font-semibold">front:</span> {s.front}
+                            </div>
+                            <div className="text-gray-500"><span className="font-semibold">back:</span> {s.back}</div>
+                          </li>
+                        ))}
+                      </ul>
+                    </details>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </details>
       </div>
 
       {/* Fix existing .apkg section */}

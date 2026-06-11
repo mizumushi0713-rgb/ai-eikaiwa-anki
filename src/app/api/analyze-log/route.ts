@@ -50,10 +50,25 @@ function deduplicateCards(cards: DeckCard[]): DeckCard[] {
   });
 }
 
+type Example = { front: string; back: string; type: string };
+
+function formatExamples(examples?: Example[]): string {
+  if (!examples || examples.length === 0) return '';
+  const list = examples
+    .map((e, i) => `[例${i + 1}] type=${e.type}\n  front: ${e.front}\n  back:  ${e.back}`)
+    .join('\n');
+  return `
+
+【お手本 — 過去に高評価されたカードのフォーマット】
+以下のサンプルカードと同じスタイル・構造・言語配置・装飾レベルで生成してください。
+${list}`;
+}
+
 /** System instruction: expert persona + custom directive in the high-priority channel. */
 function buildSystemInstruction(
   logType: 'chat' | 'gemini_live',
   customInstruction?: string,
+  examples?: Example[],
 ): string {
   const logRules = logType === 'gemini_live'
     ? `【ログ種別：Gemini Live 英会話練習】
@@ -73,12 +88,16 @@ HTMLタグ（<span style="color:red">...</span>、<b>...</b> など）を front/
 
 ${logRules}`;
 
-  if (!customInstruction?.trim()) return base;
-  return `${base}
+  let result = base;
+  if (customInstruction?.trim()) {
+    result += `
 
 【ユーザーからの追加指示 — 絶対に守ること】
 ${customInstruction.trim()}
 上記の追加指示はすべてのカードに必ず適用し、一切省略・無視しないでください。`;
+  }
+  result += formatExamples(examples);
+  return result;
 }
 
 function buildPrompt(
@@ -166,9 +185,10 @@ export async function POST(req: NextRequest) {
       logType?: 'chat' | 'gemini_live';
       format?: DeckFormat;
       customInstruction?: string;
+      examples?: Example[];
     };
 
-    const { text, logType = 'chat', format = 'auto', customInstruction } = body;
+    const { text, logType = 'chat', format = 'auto', customInstruction, examples } = body;
 
     if (!text?.trim()) {
       return Response.json({ error: 'ログテキストが必要です' }, { status: 400 });
@@ -179,7 +199,7 @@ export async function POST(req: NextRequest) {
     const targetPerChunk = totalChunks === 1 ? 20 : 12;
 
     const hasCustomInstruction = !!customInstruction?.trim();
-    const systemInstruction = buildSystemInstruction(logType, customInstruction);
+    const systemInstruction = buildSystemInstruction(logType, customInstruction, examples);
     const allCards: DeckCard[] = [];
 
     for (let i = 0; i < chunks.length; i++) {

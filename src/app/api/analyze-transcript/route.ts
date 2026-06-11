@@ -13,16 +13,34 @@ const FORMAT_INSTRUCTIONS: Record<DeckFormat, string> = {
   detailed: '裏面（back）には日本語訳に加え、類似表現・文脈・使い方の解説も詳しく含めてください。type は "basic" を使用。',
 };
 
-function buildSystemInstruction(customInstruction?: string): string {
+type Example = { front: string; back: string; type: string };
+
+function formatExamples(examples?: Example[]): string {
+  if (!examples || examples.length === 0) return '';
+  const list = examples
+    .map((e, i) => `[例${i + 1}] type=${e.type}\n  front: ${e.front}\n  back:  ${e.back}`)
+    .join('\n');
+  return `
+
+【お手本 — 過去に高評価されたカードのフォーマット】
+以下のサンプルカードと同じスタイル・構造・言語配置・装飾レベルで生成してください。
+${list}`;
+}
+
+function buildSystemInstruction(customInstruction?: string, examples?: Example[]): string {
   const base = `あなたは英語学習用Ankiフラッシュカード作成の専門家です。
 出力はJSONのみとし、前後に説明文・コードブロックは一切付けないでください。
 HTMLタグ（<span style="color:red">...</span>、<b>...</b> など）を front/back に使って装飾しても構いません。`;
-  if (!customInstruction?.trim()) return base;
-  return `${base}
+  let result = base;
+  if (customInstruction?.trim()) {
+    result += `
 
 【ユーザーからの追加指示 — 絶対に守ること】
 ${customInstruction.trim()}
 上記の追加指示はすべてのカードに必ず適用し、一切省略・無視しないでください。`;
+  }
+  result += formatExamples(examples);
+  return result;
 }
 
 function buildPrompt(text: string, format: DeckFormat, hasCustomInstruction: boolean): string {
@@ -79,15 +97,16 @@ export async function POST(req: NextRequest) {
       text: string;
       format?: DeckFormat;
       customInstruction?: string;
+      examples?: Example[];
     };
 
-    const { text, format = 'auto', customInstruction } = body;
+    const { text, format = 'auto', customInstruction, examples } = body;
     if (!text?.trim()) {
       return Response.json({ error: 'テキストが必要です' }, { status: 400 });
     }
 
     const hasCustomInstruction = !!customInstruction?.trim();
-    const systemInstruction = buildSystemInstruction(customInstruction);
+    const systemInstruction = buildSystemInstruction(customInstruction, examples);
     const prompt = buildPrompt(text, format, hasCustomInstruction);
     let lastError: unknown;
 

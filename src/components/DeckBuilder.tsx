@@ -102,6 +102,7 @@ export default function DeckBuilder() {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [withAudio, setWithAudio] = useState(false);
+  const [audioSide, setAudioSide] = useState<'auto' | 'front' | 'back' | 'both'>('auto');
   const [refiningCardId, setRefiningCardId] = useState<string | null>(null);
   const [isQualityChecking, setIsQualityChecking] = useState(false);
   const [qualityMessage, setQualityMessage] = useState('');
@@ -486,7 +487,7 @@ export default function DeckBuilder() {
     if (withAudio) {
       // Use fetch for audio export so we can show a loading spinner
       // (audio generation takes 10-30s depending on card count)
-      const payload = { cards, deckName: deckName || '学習デッキ', cardStyle, withAudio: true };
+      const payload = { cards, deckName: deckName || '学習デッキ', cardStyle, withAudio: true, audioSide };
       fetch('/api/generate-deck-apkg', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1298,20 +1299,56 @@ export default function DeckBuilder() {
             </div>
 
             {/* Audio option + Export Button */}
-            <label className="mt-4 flex items-start gap-3 cursor-pointer select-none">
-              <input
-                type="checkbox"
-                checked={withAudio}
-                onChange={(e) => setWithAudio(e.target.checked)}
-                className="mt-0.5 w-4 h-4 rounded accent-emerald-600 flex-shrink-0"
-              />
-              <div>
-                <span className="text-sm font-medium text-gray-700">AI音声を付ける（英文のみ）</span>
-                <p className="text-xs text-gray-400 mt-0.5">
-                  英語カードにGemini音声を埋め込みます。カード数により生成に時間がかかります（目安：10枚で約20秒）
-                </p>
-              </div>
-            </label>
+            <div className="mt-4 space-y-2">
+              <label className="flex items-start gap-3 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={withAudio}
+                  onChange={(e) => setWithAudio(e.target.checked)}
+                  className="mt-0.5 w-4 h-4 rounded accent-emerald-600 flex-shrink-0"
+                />
+                <div>
+                  <span className="text-sm font-medium text-gray-700">AI音声を付ける</span>
+                  <p className="text-xs text-gray-400 mt-0.5">
+                    Gemini音声を埋め込みます。カード数により生成に時間がかかります（目安：10枚で約20秒）
+                  </p>
+                </div>
+              </label>
+
+              {withAudio && (
+                <div className="ml-7">
+                  <p className="text-xs font-medium text-gray-600 mb-1.5">音声を付ける面</p>
+                  <div className="flex rounded-xl overflow-hidden border border-gray-200 bg-gray-50 text-xs">
+                    {([
+                      { value: 'auto',  label: '自動',  desc: '各カードで英語の面を検出' },
+                      { value: 'front', label: '表面',  desc: '常に表面をTTS' },
+                      { value: 'back',  label: '裏面',  desc: '常に裏面をTTS' },
+                      { value: 'both',  label: '両面',  desc: '表面と裏面の両方をTTS（時間・APIコスト2倍）' },
+                    ] as { value: typeof audioSide; label: string; desc: string }[]).map(({ value, label, desc }) => (
+                      <button
+                        key={value}
+                        type="button"
+                        onClick={() => setAudioSide(value)}
+                        title={desc}
+                        className={`flex-1 py-1.5 font-medium transition-colors ${
+                          audioSide === value
+                            ? 'bg-white text-emerald-700 shadow-sm'
+                            : 'text-gray-500 hover:text-gray-700'
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                  <p className="text-xs text-gray-400 mt-1">
+                    {audioSide === 'auto'  && '各カードで英語の面（front/back）を自動判定して音声を付けます'}
+                    {audioSide === 'front' && 'すべてのカードの表面に音声を付けます'}
+                    {audioSide === 'back'  && 'すべてのカードの裏面に音声を付けます'}
+                    {audioSide === 'both'  && '表面と裏面の両方に音声を付けます（生成時間・APIコストが2倍）'}
+                  </p>
+                </div>
+              )}
+            </div>
 
             <button
               onClick={handleExport}

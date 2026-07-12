@@ -1,9 +1,15 @@
 import { NextRequest } from 'next/server';
 import { generateApkgFromDeckCards } from '@/lib/deck-generator';
-import { generateAudioFiles } from '@/lib/tts-utils';
+import { generateAudioFiles, type AudioSide } from '@/lib/tts-utils';
 import type { DeckCard, CardStyle } from '@/lib/types';
 
-type Payload = { cards: DeckCard[]; deckName?: string; cardStyle?: CardStyle; withAudio?: boolean };
+type Payload = {
+  cards: DeckCard[];
+  deckName?: string;
+  cardStyle?: CardStyle;
+  withAudio?: boolean;
+  audioSide?: AudioSide;
+};
 
 export async function POST(req: NextRequest) {
   try {
@@ -14,6 +20,7 @@ export async function POST(req: NextRequest) {
     let deckName = '学習デッキ';
     let cardStyle: CardStyle | undefined;
     let withAudio = false;
+    let audioSide: AudioSide = 'auto';
 
     if (contentType.includes('application/x-www-form-urlencoded') || contentType.includes('multipart/form-data')) {
       const form = await req.formData();
@@ -26,25 +33,27 @@ export async function POST(req: NextRequest) {
       if (parsed.deckName) deckName = parsed.deckName;
       cardStyle = parsed.cardStyle;
       withAudio = parsed.withAudio ?? false;
+      if (parsed.audioSide) audioSide = parsed.audioSide;
     } else {
       const body = await req.json() as Payload;
       cards = body.cards;
       if (body.deckName) deckName = body.deckName;
       cardStyle = body.cardStyle;
       withAudio = body.withAudio ?? false;
+      if (body.audioSide) audioSide = body.audioSide;
     }
 
     if (!cards || cards.length === 0) {
       return new Response('No cards provided', { status: 400 });
     }
 
-    // Generate Gemini TTS audio for English cards if requested.
-    // TTS auto-picks the English side (front or back) per card.
+    // Generate Gemini TTS audio using the user-selected side mode.
     let audioFiles: Awaited<ReturnType<typeof generateAudioFiles>> | undefined;
     if (withAudio && process.env.GOOGLE_API_KEY) {
       audioFiles = await generateAudioFiles(
         cards.map((c) => ({ front: c.front, back: c.back })),
-        process.env.GOOGLE_API_KEY
+        process.env.GOOGLE_API_KEY,
+        { audioSide }
       );
     }
 

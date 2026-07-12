@@ -22,9 +22,10 @@ export async function POST(req: NextRequest) {
     if (withAudio && process.env.GOOGLE_API_KEY) {
       const results = await generateAudioFiles(
         cards.map((c) => ({ front: c.front, back: '' })),
-        process.env.GOOGLE_API_KEY
+        process.env.GOOGLE_API_KEY,
+        { audioSide: 'front' }
       );
-      audioFiles = results.map((r) => (r ? r.wav : null));
+      audioFiles = results.map((r) => r?.frontWav ?? null);
     }
 
     const apkgBuffer = await generateApkg(cards, pattern, deckName, audioFiles);

@@ -127,7 +127,7 @@ function buildClozeModel(css: string) {
   };
 }
 
-export interface AudioResult { wav: Buffer; side: 'front' | 'back' }
+export interface AudioResult { frontWav: Buffer | null; backWav: Buffer | null }
 
 export async function generateApkgFromDeckCards(
   cards: DeckCard[],
@@ -207,12 +207,11 @@ export async function generateApkgFromDeckCards(
     const guid = generateGuid();
     const modelId = card.type === 'cloze' ? MODEL_ID_CLOZE : MODEL_ID_BASIC;
     // Basic: Front\x1fBack  |  Cloze: Text\x1fExtra
-    // Attach [sound:] to whichever side of the card the English text was on.
+    // Attach [sound:] to each side that has audio.
     const audio = audioFiles?.[idx];
-    const audioTag = audio ? ` [sound:deck-${idx}.wav]` : '';
-    const frontWithAudio = audio && audio.side === 'front' ? `${card.front}${audioTag}` : card.front;
-    const backWithAudio  = audio && audio.side === 'back'  ? `${card.back}${audioTag}`  : card.back;
-    const flds = `${frontWithAudio}\x1f${backWithAudio}`;
+    const frontTag = audio?.frontWav ? ` [sound:deck-${idx}-front.wav]` : '';
+    const backTag  = audio?.backWav  ? ` [sound:deck-${idx}-back.wav]`  : '';
+    const flds = `${card.front}${frontTag}\x1f${card.back}${backTag}`;
     const sfld = card.front;
     const csum = fieldChecksum(sfld);
     const tagsStr = card.tags.length > 0 ? ' ' + card.tags.join(' ') + ' ' : '';
@@ -254,12 +253,20 @@ export async function generateApkgFromDeckCards(
   zip.file('collection.anki2', sqliteBuffer);
 
   const mediaMap: Record<string, string> = {};
+  let mediaCounter = 0;
   if (audioFiles) {
     audioFiles.forEach((audio, idx) => {
-      if (audio) {
-        const mediaIdx = String(idx);
-        const filename = `deck-${idx}.wav`;
-        zip.file(mediaIdx, audio.wav);
+      if (!audio) return;
+      if (audio.frontWav) {
+        const mediaIdx = String(mediaCounter++);
+        const filename = `deck-${idx}-front.wav`;
+        zip.file(mediaIdx, audio.frontWav);
+        mediaMap[mediaIdx] = filename;
+      }
+      if (audio.backWav) {
+        const mediaIdx = String(mediaCounter++);
+        const filename = `deck-${idx}-back.wav`;
+        zip.file(mediaIdx, audio.backWav);
         mediaMap[mediaIdx] = filename;
       }
     });

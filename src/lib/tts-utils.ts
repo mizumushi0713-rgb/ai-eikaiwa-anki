@@ -58,9 +58,11 @@ export function isEnglishText(text: string): boolean {
 }
 
 export interface AudioResult {
-  wav: Buffer;
-  side: 'front' | 'back';
+  frontWav: Buffer | null;
+  backWav: Buffer | null;
 }
+
+export type AudioSide = 'auto' | 'front' | 'back' | 'both';
 
 const TTS_VOICE = 'Kore';
 const CHUNK_SIZE = 3;
@@ -113,56 +115,80 @@ async function ttsOnce(
 }
 
 /**
- * Pick the English side of a card automatically. Returns null if neither
- * side is English enough for TTS.
+ * Decide which side(s) of a card to TTS given the user's mode.
+ * - 'auto'  : pick whichever side is English (or neither if both look non-English)
+ * - 'front' : always front (skip if front is empty)
+ * - 'back'  : always back  (skip if back is empty)
+ * - 'both'  : both sides (skip each side independently if empty)
  */
-function pickEnglishSide(
+function sidesToTts(
   card: { front: string; back: string },
-): { text: string; side: 'front' | 'back' } | null {
+  mode: AudioSide,
+): { front: boolean; back: boolean } {
+  const hasFront = toTtsText(card.front).length >= 2;
+  const hasBack  = toTtsText(card.back).length  >= 2;
+  if (mode === 'front') return { front: hasFront, back: false };
+  if (mode === 'back')  return { front: false,    back: hasBack };
+  if (mode === 'both')  return { front: hasFront, back: hasBack };
+  // auto
+  const fEng = hasFront && isEnglishText(card.front);
+  const bEng = hasBack  && isEnglishText(card.back);
+  if (!fEng && !bEng) return { front: false, back: false };
   const fScore = englishScore(card.front);
   const bScore = englishScore(card.back);
-  const fEng = isEnglishText(card.front);
-  const bEng = isEnglishText(card.back);
-  if (!fEng && !bEng) return null;
   const pickFront = fEng && (!bEng || fScore >= bScore);
-  const chosen = pickFront ? card.front : card.back;
-  return { text: toTtsText(chosen), side: pickFront ? 'front' : 'back' };
+  return { front: pickFront, back: !pickFront };
 }
 
 /**
- * Generate WAV audio for an array of cards. Automatically picks the
- * English side (front or back) per card. Returns null for cards where
- * no English text was found or the API failed after retries.
+ * Generate WAV audio for an array of cards. Returns `{frontWav, backWav}`
+ * per card, either of which may be null (skipped or failed).
  */
 export async function generateAudioFiles(
   cards: { front: string; back: string }[],
   apiKey: string,
+  options: { audioSide?: AudioSide } = {},
 ): Promise<(AudioResult | null)[]> {
+  const mode: AudioSide = options.audioSide ?? 'auto';
   const ai = new GoogleGenAI({ apiKey });
   const results: (AudioResult | null)[] = new Array(cards.length).fill(null);
   let ok = 0;
   let skipped = 0;
   let failed = 0;
 
-  for (let i = 0; i < cards.length; i += CHUNK_SIZE) {
-    const chunk = cards.slice(i, i + CHUNK_SIZE);
-    const chunkResults = await Promise.all(
-      chunk.map(async (card) => {
-        const picked = pickEnglishSide(card);
-        if (!picked) return { skip: true } as const;
-        const wav = await ttsOnce(ai, picked.text);
-        if (!wav) return { skip: false, wav: null } as const;
-        return { skip: false, wav, side: picked.side } as const;
-      }),
-    );
-    chunkResults.forEach((r, j) => {
-      if (r.skip) { skipped++; return; }
-      if (!r.wav) { failed++; return; }
-      results[i + j] = { wav: r.wav, side: r.side };
-      ok++;
-    });
+  // Flatten into a list of {cardIdx, side, text} tasks so we can parallelize
+  // across sides too, not just cards.
+  type Task = { cardIdx: number; side: 'front' | 'back'; text: string };
+  const tasks: Task[] = [];
+  for (let idx = 0; idx < cards.length; idx++) {
+    const card = cards[idx];
+    const sides = sidesToTts(card, mode);
+    if (sides.front) tasks.push({ cardIdx: idx, side: 'front', text: toTtsText(card.front) });
+    if (sides.back)  tasks.push({ cardIdx: idx, side: 'back',  text: toTtsText(card.back)  });
   }
 
-  console.log(`[tts] cards=${cards.length} audio=${ok} skipped=${skipped} failed=${failed}`);
+  for (let i = 0; i < tasks.length; i += CHUNK_SIZE) {
+    const chunk = tasks.slice(i, i + CHUNK_SIZE);
+    const chunkResults = await Promise.all(
+      chunk.map(async (t) => ({ task: t, wav: await ttsOnce(ai, t.text) })),
+    );
+    for (const { task, wav } of chunkResults) {
+      if (!wav) { failed++; continue; }
+      const existing = results[task.cardIdx] ?? { frontWav: null, backWav: null };
+      if (task.side === 'front') existing.frontWav = wav;
+      else                       existing.backWav  = wav;
+      results[task.cardIdx] = existing;
+      ok++;
+    }
+  }
+
+  // Count cards where every requested side was skipped (no candidate text)
+  for (let idx = 0; idx < cards.length; idx++) {
+    const card = cards[idx];
+    const sides = sidesToTts(card, mode);
+    if (!sides.front && !sides.back) skipped++;
+  }
+
+  console.log(`[tts] mode=${mode} cards=${cards.length} clips=${ok} skipped_cards=${skipped} failed=${failed}`);
   return results;
 }

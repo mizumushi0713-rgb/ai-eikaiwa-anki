@@ -103,6 +103,12 @@ export default function DeckBuilder() {
   const [isExporting, setIsExporting] = useState(false);
   const [withAudio, setWithAudio] = useState(false);
   const [audioSide, setAudioSide] = useState<'auto' | 'front' | 'back' | 'both'>('auto');
+  const [audioReport, setAudioReport] = useState<{
+    totalClips: number;
+    failedClips: number;
+    skippedCards: number;
+    sampleErrors: string[];
+  } | null>(null);
   const [refiningCardId, setRefiningCardId] = useState<string | null>(null);
   const [isQualityChecking, setIsQualityChecking] = useState(false);
   const [qualityMessage, setQualityMessage] = useState('');
@@ -488,6 +494,7 @@ export default function DeckBuilder() {
       // Use fetch for audio export so we can show a loading spinner
       // (audio generation takes 10-30s depending on card count)
       const payload = { cards, deckName: deckName || '学習デッキ', cardStyle, withAudio: true, audioSide };
+      setAudioReport(null);
       fetch('/api/generate-deck-apkg', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -495,6 +502,19 @@ export default function DeckBuilder() {
       })
         .then(async (res) => {
           if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          // Parse the audio-generation report from the response header
+          const statsHeader = res.headers.get('X-Audio-Stats');
+          if (statsHeader) {
+            try {
+              const stats = JSON.parse(decodeURIComponent(statsHeader));
+              setAudioReport({
+                totalClips: stats.totalClips ?? 0,
+                failedClips: stats.failedClips ?? 0,
+                skippedCards: stats.skippedCards ?? 0,
+                sampleErrors: Array.isArray(stats.sampleErrors) ? stats.sampleErrors : [],
+              });
+            } catch { /* ignore */ }
+          }
           const blob = await res.blob();
           const url = URL.createObjectURL(blob);
           const a = document.createElement('a');
@@ -1372,6 +1392,47 @@ export default function DeckBuilder() {
                 </>
               )}
             </button>
+
+            {audioReport && (
+              <div className="mt-3 rounded-xl border px-4 py-3 text-xs space-y-1.5"
+                style={{
+                  borderColor: audioReport.failedClips > 0 ? '#fde68a' : '#bbf7d0',
+                  background:  audioReport.failedClips > 0 ? '#fffbeb' : '#f0fdf4',
+                  color:       audioReport.failedClips > 0 ? '#92400e' : '#166534',
+                }}
+              >
+                <p className="font-semibold">
+                  音声生成レポート：{audioReport.totalClips}個の音声を生成
+                  {audioReport.failedClips > 0 && `（${audioReport.failedClips}個失敗）`}
+                  {audioReport.skippedCards > 0 && `／${audioReport.skippedCards}枚のカードはスキップ`}
+                </p>
+                {audioReport.failedClips > 0 && (
+                  <>
+                    <p className="text-[11px]">
+                      考えられる原因：
+                    </p>
+                    <ul className="text-[11px] list-disc pl-4 space-y-0.5">
+                      {audioReport.sampleErrors.some((e) => /429|quota|RESOURCE_EXHAUSTED|rate/i.test(e)) && (
+                        <li>
+                          <b>Gemini TTS のレート制限</b>（Google API の1分あたり・1日あたりの上限に到達）。
+                          Google Cloud で課金を有効化するか、少ないカード数で再エクスポートしてください。
+                        </li>
+                      )}
+                      {audioReport.sampleErrors.some((e) => /empty audio/i.test(e)) && (
+                        <li>特定のテキストで音声生成が空返しになりました（長すぎる/特殊文字など）。</li>
+                      )}
+                      {audioReport.sampleErrors.length > 0 && (
+                        <li>
+                          エラー例：<code className="text-[10px] bg-white/60 px-1 rounded">
+                            {audioReport.sampleErrors[0].slice(0, 90)}
+                          </code>
+                        </li>
+                      )}
+                    </ul>
+                  </>
+                )}
+              </div>
+            )}
           </div>
         )}
       </div>

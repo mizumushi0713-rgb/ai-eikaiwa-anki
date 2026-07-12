@@ -48,27 +48,32 @@ export async function POST(req: NextRequest) {
     }
 
     // Generate Gemini TTS audio using the user-selected side mode.
-    let audioFiles: Awaited<ReturnType<typeof generateAudioFiles>> | undefined;
+    let audioResult: Awaited<ReturnType<typeof generateAudioFiles>> | undefined;
     if (withAudio && process.env.GOOGLE_API_KEY) {
-      audioFiles = await generateAudioFiles(
+      audioResult = await generateAudioFiles(
         cards.map((c) => ({ front: c.front, back: c.back })),
         process.env.GOOGLE_API_KEY,
         { audioSide }
       );
     }
 
-    const apkgBuffer = await generateApkgFromDeckCards(cards, deckName, cardStyle, audioFiles);
+    const apkgBuffer = await generateApkgFromDeckCards(cards, deckName, cardStyle, audioResult?.audio);
     const date = new Date().toISOString().slice(0, 10);
     const filename = `${deckName}_${date}.apkg`;
 
-    return new Response(new Uint8Array(apkgBuffer), {
-      headers: {
-        'Content-Type': 'application/octet-stream',
-        'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(filename)}`,
-        'Content-Length': String(apkgBuffer.length),
-        'Cache-Control': 'no-cache',
-      },
-    });
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/octet-stream',
+      'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(filename)}`,
+      'Content-Length': String(apkgBuffer.length),
+      'Cache-Control': 'no-cache',
+    };
+    if (audioResult) {
+      // Expose CORS-safelisted-ish headers so the browser fetch layer can read them
+      headers['Access-Control-Expose-Headers'] = 'X-Audio-Stats';
+      headers['X-Audio-Stats'] = encodeURIComponent(JSON.stringify(audioResult.stats));
+    }
+
+    return new Response(new Uint8Array(apkgBuffer), { headers });
   } catch (error) {
     console.error('[/api/generate-deck-apkg]', error);
     return new Response('Failed to generate .apkg file', { status: 500 });

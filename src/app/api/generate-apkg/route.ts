@@ -20,12 +20,12 @@ export async function POST(req: NextRequest) {
     // so we pass an empty back — TTS will always pick front.
     let audioFiles: (Buffer | null)[] | undefined;
     if (withAudio && process.env.GOOGLE_API_KEY) {
-      const results = await generateAudioFiles(
+      const { audio } = await generateAudioFiles(
         cards.map((c) => ({ front: c.front, back: '' })),
         process.env.GOOGLE_API_KEY,
         { audioSide: 'front' }
       );
-      audioFiles = results.map((r) => r?.frontWav ?? null);
+      audioFiles = audio.map((r) => r?.frontWav ?? null);
     }
 
     const apkgBuffer = await generateApkg(cards, pattern, deckName, audioFiles);

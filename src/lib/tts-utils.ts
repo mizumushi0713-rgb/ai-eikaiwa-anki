@@ -66,18 +66,29 @@ export type AudioSide = 'auto' | 'front' | 'back' | 'both';
 
 const TTS_VOICE = 'Kore';
 const CHUNK_SIZE = 3;
-const MAX_RETRIES = 2;
+const MAX_RETRIES = 3;
+const MAX_TTS_TEXT_LENGTH = 500; // TTS is unreliable on very long strings
 
 function sleep(ms: number) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-/** Single TTS call with retry on transient errors. */
+function truncateForTts(text: string): string {
+  if (text.length <= MAX_TTS_TEXT_LENGTH) return text;
+  // Try to break at a sentence boundary
+  const cut = text.slice(0, MAX_TTS_TEXT_LENGTH);
+  const lastPeriod = Math.max(cut.lastIndexOf('. '), cut.lastIndexOf('。'), cut.lastIndexOf('! '), cut.lastIndexOf('? '));
+  return lastPeriod > MAX_TTS_TEXT_LENGTH * 0.5 ? cut.slice(0, lastPeriod + 1) : cut;
+}
+
+/** Single TTS call with retry on any error. */
 async function ttsOnce(
   ai: GoogleGenAI,
-  text: string,
-): Promise<Buffer | null> {
+  rawText: string,
+): Promise<{ wav: Buffer | null; lastError?: string }> {
+  const text = truncateForTts(rawText);
   let lastErr: unknown;
+  let lastErrMsg = '';
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     try {
       const response = await ai.models.generateContent({
@@ -93,25 +104,22 @@ async function ttsOnce(
       const audioData =
         response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
       if (!audioData) throw new Error('empty audio payload');
-      return pcmToWav(Buffer.from(audioData, 'base64'));
+      return { wav: pcmToWav(Buffer.from(audioData, 'base64')) };
     } catch (err) {
       lastErr = err;
-      const msg = err instanceof Error ? err.message : String(err);
-      const transient =
-        msg.includes('429') ||
-        msg.includes('quota') ||
-        msg.includes('RESOURCE_EXHAUSTED') ||
-        msg.includes('500') ||
-        msg.includes('503') ||
-        msg.includes('UNAVAILABLE') ||
-        msg.includes('DEADLINE_EXCEEDED') ||
-        msg.includes('empty audio payload');
-      if (!transient || attempt === MAX_RETRIES) break;
-      await sleep(800 * Math.pow(2, attempt)); // 0.8s, 1.6s
+      lastErrMsg = err instanceof Error ? err.message : String(err);
+      const isQuota = /429|quota|RESOURCE_EXHAUSTED|rate/i.test(lastErrMsg);
+      if (attempt < MAX_RETRIES) {
+        // Longer backoff for quota errors so the per-minute window can reset.
+        const base = isQuota ? 5000 : 1500;
+        const wait = base * Math.pow(2, attempt) + Math.random() * 500;
+        console.warn(`[tts] attempt ${attempt + 1}/${MAX_RETRIES + 1} failed (${isQuota ? 'quota' : 'other'}): ${lastErrMsg.slice(0, 120)} — retrying in ${Math.round(wait)}ms`);
+        await sleep(wait);
+      }
     }
   }
-  console.warn('[tts] failed:', lastErr instanceof Error ? lastErr.message : lastErr);
-  return null;
+  console.warn(`[tts] gave up after ${MAX_RETRIES + 1} attempts: ${lastErrMsg.slice(0, 200)}`);
+  return { wav: null, lastError: lastErrMsg.slice(0, 200) };
 }
 
 /**
@@ -140,6 +148,15 @@ function sidesToTts(
   return { front: pickFront, back: !pickFront };
 }
 
+export interface AudioStats {
+  mode: AudioSide;
+  totalCards: number;
+  totalClips: number;    // clips generated successfully
+  failedClips: number;   // clips that failed after all retries
+  skippedCards: number;  // cards where no side was requested/eligible
+  sampleErrors: string[]; // up to 3 distinct error messages for diagnosis
+}
+
 /**
  * Generate WAV audio for an array of cards. Returns `{frontWav, backWav}`
  * per card, either of which may be null (skipped or failed).
@@ -148,13 +165,13 @@ export async function generateAudioFiles(
   cards: { front: string; back: string }[],
   apiKey: string,
   options: { audioSide?: AudioSide } = {},
-): Promise<(AudioResult | null)[]> {
+): Promise<{ audio: (AudioResult | null)[]; stats: AudioStats }> {
   const mode: AudioSide = options.audioSide ?? 'auto';
   const ai = new GoogleGenAI({ apiKey });
   const results: (AudioResult | null)[] = new Array(cards.length).fill(null);
   let ok = 0;
-  let skipped = 0;
   let failed = 0;
+  const errorSamples = new Set<string>();
 
   // Flatten into a list of {cardIdx, side, text} tasks so we can parallelize
   // across sides too, not just cards.
@@ -167,28 +184,54 @@ export async function generateAudioFiles(
     if (sides.back)  tasks.push({ cardIdx: idx, side: 'back',  text: toTtsText(card.back)  });
   }
 
+  let sawQuotaError = false;
   for (let i = 0; i < tasks.length; i += CHUNK_SIZE) {
     const chunk = tasks.slice(i, i + CHUNK_SIZE);
     const chunkResults = await Promise.all(
-      chunk.map(async (t) => ({ task: t, wav: await ttsOnce(ai, t.text) })),
+      chunk.map(async (t) => ({ task: t, ...(await ttsOnce(ai, t.text)) })),
     );
-    for (const { task, wav } of chunkResults) {
-      if (!wav) { failed++; continue; }
+    for (const { task, wav, lastError } of chunkResults) {
+      if (!wav) {
+        failed++;
+        if (lastError) {
+          if (/429|quota|RESOURCE_EXHAUSTED|rate/i.test(lastError)) sawQuotaError = true;
+          if (errorSamples.size < 3) errorSamples.add(lastError);
+        }
+        continue;
+      }
       const existing = results[task.cardIdx] ?? { frontWav: null, backWav: null };
       if (task.side === 'front') existing.frontWav = wav;
       else                       existing.backWav  = wav;
       results[task.cardIdx] = existing;
       ok++;
     }
+    // If we already hit quota this batch, breathe before the next batch to
+    // give the per-minute window a chance to reset.
+    if (sawQuotaError && i + CHUNK_SIZE < tasks.length) {
+      await sleep(4000);
+      sawQuotaError = false;
+    }
   }
 
   // Count cards where every requested side was skipped (no candidate text)
+  let skippedCards = 0;
   for (let idx = 0; idx < cards.length; idx++) {
     const card = cards[idx];
     const sides = sidesToTts(card, mode);
-    if (!sides.front && !sides.back) skipped++;
+    if (!sides.front && !sides.back) skippedCards++;
   }
 
-  console.log(`[tts] mode=${mode} cards=${cards.length} clips=${ok} skipped_cards=${skipped} failed=${failed}`);
-  return results;
+  const stats: AudioStats = {
+    mode,
+    totalCards: cards.length,
+    totalClips: ok,
+    failedClips: failed,
+    skippedCards,
+    sampleErrors: Array.from(errorSamples),
+  };
+  console.log(`[tts] mode=${mode} cards=${cards.length} clips=${ok} skipped_cards=${skippedCards} failed=${failed}`);
+  if (stats.sampleErrors.length > 0) {
+    console.log(`[tts] sample errors: ${stats.sampleErrors.map((e) => e.slice(0, 100)).join(' | ')}`);
+  }
+  return { audio: results, stats };
 }

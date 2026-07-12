@@ -15,14 +15,16 @@ export async function POST(req: NextRequest) {
       return new Response('Invalid pattern', { status: 400 });
     }
 
-    // Generate audio for English texts if requested
+    // Generate audio for English texts if requested.
+    // card.front is always the English phrase regardless of pattern,
+    // so we pass an empty back — TTS will always pick front.
     let audioFiles: (Buffer | null)[] | undefined;
     if (withAudio && process.env.GOOGLE_API_KEY) {
-      // card.front is always the English phrase regardless of pattern
-      audioFiles = await generateAudioFiles(
-        cards.map((c) => c.front),
+      const results = await generateAudioFiles(
+        cards.map((c) => ({ front: c.front, back: '' })),
         process.env.GOOGLE_API_KEY
       );
+      audioFiles = results.map((r) => (r ? r.wav : null));
     }
 
     const apkgBuffer = await generateApkg(cards, pattern, deckName, audioFiles);

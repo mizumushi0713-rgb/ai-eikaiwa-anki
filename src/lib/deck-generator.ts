@@ -127,11 +127,13 @@ function buildClozeModel(css: string) {
   };
 }
 
+export interface AudioResult { wav: Buffer; side: 'front' | 'back' }
+
 export async function generateApkgFromDeckCards(
   cards: DeckCard[],
   deckName: string,
   style?: CardStyle,
-  audioFiles?: (Buffer | null)[]
+  audioFiles?: (AudioResult | null)[]
 ): Promise<Buffer> {
   const css = buildCss(style);
   const wasmPath = path.join(process.cwd(), 'public', 'sql-wasm.wasm');
@@ -205,8 +207,12 @@ export async function generateApkgFromDeckCards(
     const guid = generateGuid();
     const modelId = card.type === 'cloze' ? MODEL_ID_CLOZE : MODEL_ID_BASIC;
     // Basic: Front\x1fBack  |  Cloze: Text\x1fExtra
-    const audioTag = audioFiles?.[idx] ? ` [sound:deck-${idx}.wav]` : '';
-    const flds = `${card.front}${audioTag}\x1f${card.back}`;
+    // Attach [sound:] to whichever side of the card the English text was on.
+    const audio = audioFiles?.[idx];
+    const audioTag = audio ? ` [sound:deck-${idx}.wav]` : '';
+    const frontWithAudio = audio && audio.side === 'front' ? `${card.front}${audioTag}` : card.front;
+    const backWithAudio  = audio && audio.side === 'back'  ? `${card.back}${audioTag}`  : card.back;
+    const flds = `${frontWithAudio}\x1f${backWithAudio}`;
     const sfld = card.front;
     const csum = fieldChecksum(sfld);
     const tagsStr = card.tags.length > 0 ? ' ' + card.tags.join(' ') + ' ' : '';
@@ -249,11 +255,11 @@ export async function generateApkgFromDeckCards(
 
   const mediaMap: Record<string, string> = {};
   if (audioFiles) {
-    audioFiles.forEach((wav, idx) => {
-      if (wav) {
+    audioFiles.forEach((audio, idx) => {
+      if (audio) {
         const mediaIdx = String(idx);
         const filename = `deck-${idx}.wav`;
-        zip.file(mediaIdx, wav);
+        zip.file(mediaIdx, audio.wav);
         mediaMap[mediaIdx] = filename;
       }
     });

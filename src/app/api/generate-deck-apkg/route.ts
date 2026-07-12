@@ -38,11 +38,12 @@ export async function POST(req: NextRequest) {
       return new Response('No cards provided', { status: 400 });
     }
 
-    // Generate Gemini TTS audio for English cards if requested
-    let audioFiles: (Buffer | null)[] | undefined;
+    // Generate Gemini TTS audio for English cards if requested.
+    // TTS auto-picks the English side (front or back) per card.
+    let audioFiles: Awaited<ReturnType<typeof generateAudioFiles>> | undefined;
     if (withAudio && process.env.GOOGLE_API_KEY) {
       audioFiles = await generateAudioFiles(
-        cards.map((c) => c.front),
+        cards.map((c) => ({ front: c.front, back: c.back })),
         process.env.GOOGLE_API_KEY
       );
     }
